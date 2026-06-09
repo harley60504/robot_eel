@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 import json
 import queue
 import subprocess
@@ -185,6 +185,8 @@ class GaitGui(tk.Tk):
             self.info.insert(tk.END, f"wavelength: {data.get('wavelength')}\n\n")
             self.info.insert(tk.END, "joint_bias:\n")
             self.info.insert(tk.END, ", ".join(str(v) for v in data.get("joint_bias", [])))
+            self.info.insert(tk.END, "\n\n")
+            self.info.insert(tk.END, "Fixed gait will run once until first wall contact, then print average R in Metrics Window.")
         self.info.configure(state=tk.DISABLED)
 
     def update_mode(self):
@@ -252,6 +254,7 @@ class GaitGui(tk.Tk):
                 sys.executable,
                 str(ROOT / "view_gait.py"),
                 str(gait_path),
+                "--print-contacts",
             ]
             label = gait_path.stem
         try:
@@ -380,4 +383,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
