@@ -9,16 +9,17 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
 from hopf_cpg import HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="View a saved Hopf CPG gait JSON.")
     parser.add_argument("gait", type=Path, help="Path to a gait JSON file.")
-    parser.add_argument("--xml", default="eel.xml")
+    parser.add_argument("--xml", default=EEL_MODEL_XML)
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--start-x", type=float, default=0.60)
-    parser.add_argument("--start-y", type=float, default=0.0)
+    parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
+    parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
     parser.add_argument("--print-contacts", action="store_true")
     parser.add_argument(
         "--contact-ignore-seconds",

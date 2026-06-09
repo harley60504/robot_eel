@@ -7,6 +7,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 
@@ -19,7 +20,7 @@ def parse_float_list(value: str, expected_len: int, name: str) -> tuple[float, .
 
 def parse_args():
     parser = argparse.ArgumentParser(description="View the untethered eel swimming freely.")
-    parser.add_argument("--xml", default="eel.xml")
+    parser.add_argument("--xml", default=EEL_MODEL_XML)
     parser.add_argument("--ajoint", "--amp", dest="ajoint", type=float, default=DEFAULT_AJOINT_DEG, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--freq", type=float, default=1.0)
     parser.add_argument("--wavelength", type=float, default=1.5)
@@ -40,8 +41,9 @@ def parse_args():
         help="Static per-joint steering offset in radians.",
     )
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--reset-x", type=float, default=1.725)
-    parser.add_argument("--reset-y", type=float, default=0.90)
+    parser.add_argument("--reset-x-min", type=float, default=RESET_X_MIN)
+    parser.add_argument("--reset-x-max", type=float, default=RESET_X_MAX)
+    parser.add_argument("--reset-y", type=float, default=RESET_Y)
     return parser.parse_args()
 
 
@@ -72,7 +74,7 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         with viewer.lock():
-            viewer.cam.lookat[:] = np.array([0.0, 0.0, -0.02])
+            viewer.cam.lookat[:] = np.array([TANK_CENTER_X, 0.0, -0.02])
             viewer.cam.distance = 1.4
             viewer.cam.elevation = -70
             viewer.cam.azimuth = 0
@@ -83,7 +85,7 @@ def main():
             mujoco.mj_step(model, data)
             base_pos = data.xpos[base_body_id]
 
-            if abs(base_pos[0]) > args.reset_x or abs(base_pos[1]) > args.reset_y:
+            if base_pos[0] < args.reset_x_min or base_pos[0] > args.reset_x_max or abs(base_pos[1]) > args.reset_y:
                 print(
                     f"reset to start: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}",
                     flush=True,

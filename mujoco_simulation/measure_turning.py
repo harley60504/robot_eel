@@ -7,6 +7,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, degrees_to_radians
 from view_rectangle_course import amp_scales_to_mu_scales, turning_amp_scales
 
@@ -20,7 +21,7 @@ def parse_float_list(value: str, expected_len: int, name: str) -> tuple[float, .
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Measure free-swim turning gait metrics.")
-    parser.add_argument("--xml", default="eel.xml")
+    parser.add_argument("--xml", default=EEL_MODEL_XML)
     parser.add_argument("--seconds", type=float, default=12.0)
     parser.add_argument("--warmup-seconds", type=float, default=2.0)
     parser.add_argument("--ajoint", "--amp", dest="ajoint", type=float, default=DEFAULT_AJOINT_DEG, help="Base joint angle amplitude in degrees.")

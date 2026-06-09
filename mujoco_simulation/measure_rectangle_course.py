@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import csv
@@ -9,6 +9,7 @@ import numpy as np
 
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, degrees_to_radians, wrap_pi
 from rectangle_path import RectanglePath
+from sim_config import RECTANGLE_CONTROL_SIGN, RECTANGLE_MODEL_XML, RECTANGLE_PATH_CENTER_X, RECTANGLE_PATH_CENTER_Y, RECTANGLE_PATH_HALF_X, RECTANGLE_PATH_HALF_Y, RECTANGLE_WAYPOINTS, RESET_X_MAX, RESET_X_MIN, RESET_Y
 from view_rectangle_course import (
     amp_scales_to_mu_scales,
     parse_float_list,
@@ -20,7 +21,7 @@ from view_rectangle_course import (
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Headless test for the 3 m x 1.5 m rectangle course.")
-    parser.add_argument("--xml", default="eel_rectangle.xml")
+    parser.add_argument("--xml", default=RECTANGLE_MODEL_XML)
     parser.add_argument("--seconds", type=float, default=80.0)
     parser.add_argument("--ajoint", "--amp", dest="ajoint", type=float, default=DEFAULT_AJOINT_DEG, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--freq", type=float, default=1.0)
@@ -38,19 +39,23 @@ def parse_args():
     parser.add_argument(
         "--waypoints",
         type=parse_waypoints,
-        default=parse_waypoints("1.10,-0.35;1.10,0.35;-1.10,0.35;-1.10,-0.35"),
+        default=parse_waypoints(RECTANGLE_WAYPOINTS),
     )
     parser.add_argument("--controller", choices=("pure_pursuit", "waypoint"), default="pure_pursuit")
-    parser.add_argument("--path-half-x", type=float, default=1.10)
-    parser.add_argument("--path-half-y", type=float, default=0.35)
+    parser.add_argument("--path-half-x", type=float, default=RECTANGLE_PATH_HALF_X)
+    parser.add_argument("--path-half-y", type=float, default=RECTANGLE_PATH_HALF_Y)
+    parser.add_argument("--path-center-x", type=float, default=RECTANGLE_PATH_CENTER_X)
+    parser.add_argument("--path-center-y", type=float, default=RECTANGLE_PATH_CENTER_Y)
     parser.add_argument("--lookahead", type=float, default=0.75)
     parser.add_argument("--reach-radius", type=float, default=0.25)
     parser.add_argument("--steer-gain", type=float, default=0.80)
     parser.add_argument("--max-bias", type=float, default=0.50)
     parser.add_argument("--turn-amp-gain", type=float, default=1.0)
     parser.add_argument("--steer-smoothing", type=float, default=0.14)
-    parser.add_argument("--reset-x", type=float, default=1.725)
-    parser.add_argument("--reset-y", type=float, default=0.90)
+    parser.add_argument("--reset-x-min", type=float, default=RESET_X_MIN)
+    parser.add_argument("--reset-x-max", type=float, default=RESET_X_MAX)
+    parser.add_argument("--reset-y", type=float, default=RESET_Y)
+    parser.add_argument("--control-sign", type=float, default=RECTANGLE_CONTROL_SIGN)
     parser.add_argument("--contact-ignore-seconds", type=float, default=0.5)
     parser.add_argument("--csv", type=Path, default=None)
     return parser.parse_args()
@@ -64,7 +69,7 @@ def main():
     base_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
     cpg = HopfCPG(num_joints=6)
     ajoint_rad = degrees_to_radians(args.ajoint)
-    path = RectanglePath(args.path_half_x, args.path_half_y)
+    path = RectanglePath(args.path_half_x, args.path_half_y, center_x=args.path_center_x, center_y=args.path_center_y)
 
     waypoint_index = 0
     waypoint_hits = 0
@@ -126,7 +131,7 @@ def main():
             phase_lags=args.phase_lags,
             joint_bias=steering_profile(steer),
         )
-        data.ctrl[0:6] = np.clip(cpg.step(data.time, model.opt.timestep, params), -1.2, 1.2)
+        data.ctrl[0:6] = args.control_sign * np.clip(cpg.step(data.time, model.opt.timestep, params), -1.2, 1.2)
         mujoco.mj_step(model, data)
 
         base_pos = data.xpos[base_body_id].copy()
@@ -145,7 +150,7 @@ def main():
         if had_wall_contact:
             wall_contact_steps += 1
 
-        if abs(base_pos[0]) > args.reset_x or abs(base_pos[1]) > args.reset_y:
+        if base_pos[0] < args.reset_x_min or base_pos[0] > args.reset_x_max or abs(base_pos[1]) > args.reset_y:
             out_of_bounds = True
             break
 

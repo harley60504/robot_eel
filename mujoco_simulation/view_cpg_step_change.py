@@ -7,6 +7,7 @@ import mujoco
 import mujoco.viewer
 import numpy as np
 
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 
@@ -21,7 +22,7 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="View a free-swimming eel while abruptly changing CPG amplitude and wavelength."
     )
-    parser.add_argument("--xml", default="eel.xml")
+    parser.add_argument("--xml", default=EEL_MODEL_XML)
     parser.add_argument("--freq", type=float, default=1.0)
     parser.add_argument("--ajoint", type=float, default=DEFAULT_AJOINT_DEG, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--before-wavelength", type=float, default=1.6275)
@@ -56,10 +57,11 @@ def parse_args():
         help="hopf uses oscillator state; sin directly computes joint angles from time.",
     )
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--start-x", type=float, default=-1.10)
-    parser.add_argument("--start-y", type=float, default=0.0)
-    parser.add_argument("--reset-x", type=float, default=1.725)
-    parser.add_argument("--reset-y", type=float, default=0.90)
+    parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
+    parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
+    parser.add_argument("--reset-x-min", type=float, default=RESET_X_MIN)
+    parser.add_argument("--reset-x-max", type=float, default=RESET_X_MAX)
+    parser.add_argument("--reset-y", type=float, default=RESET_Y)
     return parser.parse_args()
 
 
@@ -155,7 +157,7 @@ def main():
                 print(f"mode={state} at t={data.time:.2f}s", flush=True)
                 last_switched = switched
 
-            if abs(base_pos[0]) > args.reset_x or abs(base_pos[1]) > args.reset_y:
+            if base_pos[0] < args.reset_x_min or base_pos[0] > args.reset_x_max or abs(base_pos[1]) > args.reset_y:
                 print(
                     f"reset to start: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}",
                     flush=True,

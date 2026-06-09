@@ -1,0 +1,17 @@
+<mujoco>
+  <!-- Central water / fluid parameters. Edit this file first. -->
+  <option timestep="0.001" integrator="RK4" density="998" viscosity="0.001" gravity="0 0 -9.81" />
+
+  <default>
+    <!-- Real mesh geoms handle collision only. -->
+    <default class="eel_collision_mesh">
+      <geom contype="2" conaffinity="1" group="0" rgba="1 0 0 1" />
+    </default>
+
+    <!-- Invisible simple capsules handle fluid force. Tune size in eel_body.xml if turning radius is still too large. -->
+    <default class="eel_fluid_proxy">
+      <geom contype="0" conaffinity="0" group="3" rgba="0 0.8 1 0.0"
+            fluidshape="ellipsoid" fluidcoef="0.35 0.0 0.35 0.65 0.65" />
+    </default>
+  </default>
+</mujoco>

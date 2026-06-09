@@ -10,6 +10,7 @@ import numpy as np
 
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, degrees_to_radians, wrap_pi
 from rectangle_path import RectanglePath
+from sim_config import RECTANGLE_CONTROL_SIGN, RECTANGLE_MODEL_XML, RECTANGLE_PATH_CENTER_X, RECTANGLE_PATH_CENTER_Y, RECTANGLE_PATH_HALF_X, RECTANGLE_PATH_HALF_Y, RECTANGLE_WAYPOINTS
 
 
 def safe_print(*args, **kwargs):
@@ -62,7 +63,7 @@ def amp_scales_to_mu_scales(amp_scales: tuple[float, ...]) -> tuple[float, ...]:
 
 def parse_args():
     parser = argparse.ArgumentParser(description="View an eel following a 3 m x 1.5 m rectangle course.")
-    parser.add_argument("--xml", default="eel_rectangle.xml")
+    parser.add_argument("--xml", default=RECTANGLE_MODEL_XML)
     parser.add_argument("--ajoint", "--amp", dest="ajoint", type=float, default=DEFAULT_AJOINT_DEG, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--freq", type=float, default=1.0)
     parser.add_argument("--wavelength", type=float, default=1.6275)
@@ -79,18 +80,18 @@ def parse_args():
     parser.add_argument(
         "--waypoints",
         type=parse_waypoints,
-        default=parse_waypoints("2.60,-0.35;2.60,0.35;0.40,0.35;0.40,-0.35"),
+        default=parse_waypoints(RECTANGLE_WAYPOINTS),
         help="Semicolon-separated waypoint list, for example: x,y;x,y;x,y",
     )
     parser.add_argument("--controller", choices=("pure_pursuit", "waypoint"), default="pure_pursuit")
-    parser.add_argument("--path-half-x", type=float, default=1.10)
-    parser.add_argument("--path-half-y", type=float, default=0.35)
-    parser.add_argument("--path-center-x", type=float, default=1.50)
-    parser.add_argument("--path-center-y", type=float, default=0.0)
+    parser.add_argument("--path-half-x", type=float, default=RECTANGLE_PATH_HALF_X)
+    parser.add_argument("--path-half-y", type=float, default=RECTANGLE_PATH_HALF_Y)
+    parser.add_argument("--path-center-x", type=float, default=RECTANGLE_PATH_CENTER_X)
+    parser.add_argument("--path-center-y", type=float, default=RECTANGLE_PATH_CENTER_Y)
     parser.add_argument("--lookahead", type=float, default=0.75)
     parser.add_argument("--reach-radius", type=float, default=0.25)
-    parser.add_argument("--steer-gain", type=float, default=0.80)
-    parser.add_argument("--max-bias", type=float, default=0.50)
+    parser.add_argument("--steer-gain", type=float, default=0.65)
+    parser.add_argument("--max-bias", type=float, default=0.38)
     parser.add_argument(
         "--turn-amp-gain",
         type=float,
@@ -103,6 +104,7 @@ def parse_args():
         default=0.14,
         help="Low-pass factor for steering. 1.0 disables smoothing; smaller is smoother.",
     )
+    parser.add_argument("--control-sign", type=float, default=RECTANGLE_CONTROL_SIGN, help="Use -1 when rectangle mode uses the unified eel.xml joint axes.")
     parser.add_argument("--print-hz", type=float, default=2.0)
     parser.add_argument("--follow-camera", action="store_true")
     parser.add_argument("--print-contacts", action="store_true")
@@ -203,7 +205,7 @@ def main():
                 joint_bias=joint_bias,
             )
             targets = cpg.step(data.time, model.opt.timestep, cpg_params)
-            data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
+            data.ctrl[0:6] = args.control_sign * np.clip(targets, -1.2, 1.2)
             mujoco.mj_step(model, data)
 
             if args.print_contacts and data.time >= args.contact_ignore_seconds:

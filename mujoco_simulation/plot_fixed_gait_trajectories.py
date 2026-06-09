@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
 from hopf_cpg import HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 
@@ -23,11 +24,11 @@ GAIT_FILES = (
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot fixed-gait MuJoCo trajectories.")
-    parser.add_argument("--xml", default="eel.xml")
+    parser.add_argument("--xml", default=EEL_MODEL_XML)
     parser.add_argument("--seconds", type=float, default=30.0)
     parser.add_argument("--warmup-seconds", type=float, default=0.0)
-    parser.add_argument("--start-x", type=float, default=-0.90)
-    parser.add_argument("--start-y", type=float, default=0.0)
+    parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
+    parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
     parser.add_argument("--gait-dir", type=Path, default=Path("gaits"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_3x1_5"))
     return parser.parse_args()
@@ -108,10 +109,10 @@ def summarize(arr: np.ndarray, warmup_seconds: float):
 
 
 def draw_environment(ax, start_x: float, start_y: float):
-    ax.set_xlim(-1.6, 1.6)
+    ax.set_xlim(-0.1, 3.1)
     ax.set_ylim(-0.85, 0.85)
     ax.add_patch(plt.Rectangle((-1.5, -0.75), 3.0, 1.5, fill=False, color="#7f1d1d", linewidth=1.4))
-    ax.scatter([-1.10, 1.10, 1.10, -1.10], [-0.35, -0.35, 0.35, 0.35], s=18, color="#facc15", alpha=0.45)
+    ax.scatter([0.40, 2.60, 2.60, 0.40], [-0.35, -0.35, 0.35, 0.35], s=18, color="#facc15", alpha=0.45)
     ax.scatter([start_x], [start_y], s=28, color="#22c55e", edgecolor="black", zorder=3)
 
 

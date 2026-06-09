@@ -7,6 +7,7 @@ from typing import Any
 import mujoco
 import numpy as np
 
+from sim_config import EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 try:
@@ -19,7 +20,7 @@ except ImportError:
 
 @dataclass
 class FreeSwimConfig:
-    xml_path: str = "eel.xml"
+    xml_path: str = EEL_MODEL_XML
     episode_seconds: float = 8.0
     warmup_seconds: float = 2.0
     control_dt: float = 0.02
@@ -38,8 +39,9 @@ class FreeSwimConfig:
     yaw_rate_weight: float = 0.02
     energy_weight: float = 0.02
     smoothness_weight: float = 0.02
-    boundary_x: float = 1.725
-    boundary_y: float = 0.90
+    boundary_x_min: float = RESET_X_MIN
+    boundary_x_max: float = RESET_X_MAX
+    boundary_y: float = RESET_Y
 
 
 class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
@@ -154,7 +156,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
                 + reward_smooth
             )
 
-        out_of_bounds = abs(float(base_pos[0])) > self.cfg.boundary_x or abs(float(base_pos[1])) > self.cfg.boundary_y
+        out_of_bounds = float(base_pos[0]) < self.cfg.boundary_x_min or float(base_pos[0]) > self.cfg.boundary_x_max or abs(float(base_pos[1])) > self.cfg.boundary_y
         terminated = bool(out_of_bounds)
         truncated = self.step_count >= self.max_steps
         if terminated:
