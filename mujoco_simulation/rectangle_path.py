@@ -4,10 +4,11 @@ import numpy as np
 
 
 class RectanglePath:
-    def __init__(self, half_x: float, half_y: float):
+    def __init__(self, half_x: float, half_y: float, center_x: float = 0.0, center_y: float = 0.0):
         self.half_x = float(half_x)
         self.half_y = float(half_y)
-        self.points = np.array(
+        self.center = np.array([float(center_x), float(center_y)], dtype=np.float64)
+        local_points = np.array(
             [
                 [self.half_x, -self.half_y],
                 [self.half_x, self.half_y],
@@ -16,6 +17,7 @@ class RectanglePath:
             ],
             dtype=np.float64,
         )
+        self.points = local_points + self.center
         self.starts = np.vstack([self.points[-1], self.points[:-1]])
         self.ends = self.points
         self.segments = self.ends - self.starts

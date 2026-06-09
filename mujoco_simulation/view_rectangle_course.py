@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import argparse
 import sys
@@ -79,12 +79,14 @@ def parse_args():
     parser.add_argument(
         "--waypoints",
         type=parse_waypoints,
-        default=parse_waypoints("1.10,-0.35;1.10,0.35;-1.10,0.35;-1.10,-0.35"),
+        default=parse_waypoints("2.60,-0.35;2.60,0.35;0.40,0.35;0.40,-0.35"),
         help="Semicolon-separated waypoint list, for example: x,y;x,y;x,y",
     )
     parser.add_argument("--controller", choices=("pure_pursuit", "waypoint"), default="pure_pursuit")
     parser.add_argument("--path-half-x", type=float, default=1.10)
     parser.add_argument("--path-half-y", type=float, default=0.35)
+    parser.add_argument("--path-center-x", type=float, default=1.50)
+    parser.add_argument("--path-center-y", type=float, default=0.0)
     parser.add_argument("--lookahead", type=float, default=0.75)
     parser.add_argument("--reach-radius", type=float, default=0.25)
     parser.add_argument("--steer-gain", type=float, default=0.80)
@@ -102,8 +104,6 @@ def parse_args():
         help="Low-pass factor for steering. 1.0 disables smoothing; smaller is smoother.",
     )
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--reset-x", type=float, default=1.725)
-    parser.add_argument("--reset-y", type=float, default=0.90)
     parser.add_argument("--follow-camera", action="store_true")
     parser.add_argument("--print-contacts", action="store_true")
     parser.add_argument(
@@ -124,11 +124,13 @@ def main():
 
     cpg = HopfCPG(num_joints=6)
     ajoint_rad = degrees_to_radians(args.ajoint)
-    path = RectanglePath(args.path_half_x, args.path_half_y)
+    path = RectanglePath(args.path_half_x, args.path_half_y, center_x=args.path_center_x, center_y=args.path_center_y)
     wall_geom_ids = {
         mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
         for name in ("wall_bottom", "wall_top", "wall_left", "wall_right")
     }
+    wall_geom_ids.discard(-1)
+
     waypoint_index = 0
     laps = 0
     last_path_s = 0.0
@@ -150,13 +152,14 @@ def main():
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
         with viewer.lock():
-            viewer.cam.lookat[:] = np.array([0.0, 0.0, -0.02])
+            viewer.cam.lookat[:] = np.array([1.5, 0.0, -0.02])
             viewer.cam.distance = 3.4
             viewer.cam.elevation = -90
             viewer.cam.azimuth = 0
 
         while viewer.is_running():
             base_pos = data.xpos[base_body_id].copy()
+
             if args.controller == "pure_pursuit":
                 path_s = path.closest_s(base_pos[:2])
                 if path_s + path.total_length * laps < last_path_s - 0.5 * path.total_length:
@@ -207,16 +210,12 @@ def main():
                 for i in range(data.ncon):
                     contact = data.contact[i]
                     if contact.geom1 in wall_geom_ids or contact.geom2 in wall_geom_ids:
-                        g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1)
-                        g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2)
+                        g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or f"geom{contact.geom1}"
+                        g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or f"geom{contact.geom2}"
                         wall_contact_count += 1
                         wall_contact_examples.add(f"{g1}<->{g2}")
 
             base_pos = data.xpos[base_body_id]
-            if abs(base_pos[0]) > args.reset_x or abs(base_pos[1]) > args.reset_y:
-                safe_print(f"reset: out of course x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
-                reset_to_start()
-                base_pos = data.xpos[base_body_id]
 
             now = time.time()
             if now - last_print >= print_period:
@@ -245,4 +244,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

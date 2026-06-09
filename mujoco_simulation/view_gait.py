@@ -17,10 +17,15 @@ def parse_args():
     parser.add_argument("gait", type=Path, help="Path to a gait JSON file.")
     parser.add_argument("--xml", default="eel.xml")
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--start-x", type=float, default=-0.9)
+    parser.add_argument("--start-x", type=float, default=0.60)
     parser.add_argument("--start-y", type=float, default=0.0)
-    parser.add_argument("--reset-x", type=float, default=1.725)
-    parser.add_argument("--reset-y", type=float, default=0.90)
+    parser.add_argument("--print-contacts", action="store_true")
+    parser.add_argument(
+        "--contact-ignore-seconds",
+        type=float,
+        default=0.5,
+        help="Ignore wall contacts during the initial drop/reset transient.",
+    )
     return parser.parse_args()
 
 
@@ -50,6 +55,12 @@ def main():
     model.opt.gravity[:] = (0, 0, 0)
     base_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
 
+    wall_geom_ids = {
+        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        for name in ("wall_bottom", "wall_top", "wall_left", "wall_right")
+    }
+    wall_geom_ids.discard(-1)
+
     cpg = HopfCPG(num_joints=6)
     ajoint_deg = float(gait["ajoint"])
     ajoint_rad = degrees_to_radians(ajoint_deg)
@@ -78,6 +89,18 @@ def main():
         cpg.reset()
         mujoco.mj_forward(model, data)
 
+    def detect_wall_contact() -> tuple[bool, list[str]]:
+        examples: list[str] = []
+        hit_wall = False
+        for i in range(data.ncon):
+            contact = data.contact[i]
+            if contact.geom1 in wall_geom_ids or contact.geom2 in wall_geom_ids:
+                hit_wall = True
+                g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or f"geom{contact.geom1}"
+                g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or f"geom{contact.geom2}"
+                examples.append(f"{g1}<->{g2}")
+        return hit_wall, examples
+
     reset_to_start()
 
     with mujoco.viewer.launch_passive(model, data) as viewer:
@@ -93,8 +116,13 @@ def main():
             mujoco.mj_step(model, data)
             base_pos = data.xpos[base_body_id]
 
-            if abs(base_pos[0]) > args.reset_x or abs(base_pos[1]) > args.reset_y:
-                print(f"reset to start: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
+            hit_wall, contact_examples = detect_wall_contact()
+            if hit_wall and data.time >= args.contact_ignore_seconds:
+                if args.print_contacts:
+                    examples = sorted(set(contact_examples))[:3]
+                    print(f"reset to start: wall contact {examples}", flush=True)
+                else:
+                    print(f"reset to start: wall contact x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
                 reset_to_start()
                 base_pos = data.xpos[base_body_id]
 
