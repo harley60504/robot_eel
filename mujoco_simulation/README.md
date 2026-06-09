@@ -49,7 +49,7 @@ python make_real_sim_comparison_panels.py
 ```
 
 The `R` shown on those comparison panels is the fitted trajectory-circle radius, not the body yaw-rate radius.
-`make_tracked_center_cleaned_physical.py` regenerates `outputs/video_analysis/<video_name>/tracked_center_summary_cleaned_physical.json` from the real videos. By default it processes both `turn_left` and `spin_left`.
+`make_tracked_center_cleaned_physical.py` regenerates `outputs/video_analysis/<video_name>/tracked_center_summary_cleaned_physical.json` from the real video.
 
 Run rectangle-course measurement:
 

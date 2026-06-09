@@ -8,23 +8,14 @@ import cv2
 import numpy as np
 
 
-TURN_CLIPS = {
-    "turn_left": Path("Release/python_backend/recordings/clean_v_20260608_141203.mp4"),
-    "spin_left": Path("Release/python_backend/recordings/clean_v_20260608_141254.mp4"),
-}
+DEFAULT_VIDEO = Path("Release/python_backend/recordings/clean_v_20260608_141254.mp4")
 
 
 def parse_args():
     parser = argparse.ArgumentParser(
         description="Regenerate tracked_center_summary_cleaned_physical.json from a real swim video."
     )
-    parser.add_argument(
-        "--preset",
-        choices=("all", "turn_left", "spin_left"),
-        default="all",
-        help="Real-video preset to regenerate when --video is not provided.",
-    )
-    parser.add_argument("--video", type=Path, default=None, help="Optional custom video path.")
+    parser.add_argument("--video", type=Path, default=DEFAULT_VIDEO)
     parser.add_argument("--seconds", type=float, default=8.0)
     parser.add_argument("--sample-hz", type=float, default=5.0)
     parser.add_argument("--out-dir", type=Path, default=None)
@@ -171,8 +162,9 @@ def draw_overlay(video_path: Path, seconds: float, points, fit: dict, out_path: 
     cap.release()
 
 
-def process_video(args, video: Path):
-    video_path = resolve_video(video)
+def main():
+    args = parse_args()
+    video_path = resolve_video(args.video)
     out_dir = args.out_dir
     if out_dir is None:
         out_dir = Path("outputs/video_analysis") / video_path.stem
@@ -192,19 +184,6 @@ def process_video(args, video: Path):
 
     print(json_path)
     print(f"points={len(cleaned_points)} radius_px={fit['radius_px']:.3f} arc_deg={fit['arc_deg']:.3f} rmse_px={fit['rmse_px']:.3f}")
-
-
-def main():
-    args = parse_args()
-    if args.video is not None:
-        process_video(args, args.video)
-        return
-
-    presets = ("turn_left", "spin_left") if args.preset == "all" else (args.preset,)
-    for preset in presets:
-        if args.out_dir is not None and len(presets) > 1:
-            raise ValueError("--out-dir can only be used with one preset or --video")
-        process_video(args, TURN_CLIPS[preset])
 
 
 if __name__ == "__main__":
