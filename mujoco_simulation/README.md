@@ -39,6 +39,16 @@ Run all fixed gaits:
 python plot_fixed_gait_trajectories.py
 ```
 
+Rebuild fitted trajectory curves and real-vs-MuJoCo comparison panels:
+
+```powershell
+python plot_fitted_gait_curves.py
+python track_video_start_to_wall.py
+python make_real_sim_comparison_panels.py
+```
+
+The `R` shown on those comparison panels is the fitted trajectory-circle radius, not the body yaw-rate radius.
+
 Run rectangle-course measurement:
 
 ```powershell
