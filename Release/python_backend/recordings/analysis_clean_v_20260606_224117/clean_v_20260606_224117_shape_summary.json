@@ -1,0 +1,23 @@
+{
+  "video": "clean_v_20260606_224117.mp4",
+  "fps": 15.0,
+  "frame_count": 228,
+  "width": 1080,
+  "height": 1920,
+  "sample_stride": 3,
+  "samples": 76,
+  "detected_samples": 73,
+  "csv": "analysis_clean_v_20260606_224117\\clean_v_20260606_224117_shape_metrics.csv",
+  "debug_dir": "analysis_clean_v_20260606_224117\\debug_frames",
+  "initial_angle_deg": 155.60855667329062,
+  "mean_angle_deg": 133.81507708550313,
+  "median_angle_deg": 147.16959615137267,
+  "angle_range_deg": 78.9878277339263,
+  "mean_abs_curvature_pct_length": 0.10228808402975191,
+  "center_track_dx_px": 8.389613591062584,
+  "center_track_dy_px": -0.7710687278865862,
+  "initial_body_bend_angle_deg": 29.93206765870127,
+  "mean_abs_body_bend_angle_deg": 21.245964378606534,
+  "median_abs_body_bend_angle_deg": 19.851986500156485,
+  "max_abs_body_bend_angle_deg": 80.67645658667308
+}

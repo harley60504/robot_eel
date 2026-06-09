@@ -1,0 +1,21 @@
+{
+  "video": "clean_v_20260606_224117.mp4",
+  "fps": 15.0,
+  "frame_count": 228,
+  "width": 1080,
+  "height": 1920,
+  "sample_stride": 3,
+  "samples": 76,
+  "detected_samples": 39,
+  "csv": "analysis_clean_v_20260606_224117_servo_blocks\\clean_v_20260606_224117_servo_blocks.csv",
+  "debug_dir": "analysis_clean_v_20260606_224117_servo_blocks\\servo_debug_frames",
+  "initial_servo_count": 6,
+  "mean_servo_count": 5.743589743589744,
+  "initial_servo_axis_angle_deg": 86.25839061022212,
+  "median_servo_axis_angle_deg": 94.25789938727836,
+  "servo_axis_range_deg": 344.7607555217484,
+  "initial_servo_bend_angle_deg": 8.120296856090945,
+  "mean_abs_servo_bend_angle_deg": 35.67705880802121,
+  "median_abs_servo_bend_angle_deg": 31.25311199094024,
+  "max_abs_servo_bend_angle_deg": 102.31554160757963
+}

@@ -1,0 +1,395 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-4-g7f85cfe  Build Version: 1.6.7995.38578
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot
+  name="eel_urdf">
+  <link
+    name="base_link">
+    <inertial>
+      <origin
+        xyz="0.062748 2.5587E-16 0.00026796"
+        rpy="0 0 0" />
+      <mass
+        value="0.083903" />
+      <inertia
+        ixx="4.3479E-05"
+        ixy="-1.3947E-21"
+        ixz="5.4417E-08"
+        iyy="9.8485E-05"
+        iyz="-3.0251E-23"
+        izz="9.6089E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/base_link.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/base_link.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <link
+    name="servo1">
+    <inertial>
+      <origin
+        xyz="-0.01159 -6.9584E-08 -0.025118"
+        rpy="0 0 0" />
+      <mass
+        value="0.11323" />
+      <inertia
+        ixx="3.6169E-05"
+        ixy="-4.7019E-10"
+        ixz="-1.6398E-07"
+        iyy="6.3328E-05"
+        iyz="-4.8085E-12"
+        izz="5.9619E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo1.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo1.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo1"
+    type="continuous">
+    <origin
+      xyz="-0.035 0 0.025706"
+      rpy="0 0 0" />
+    <parent
+      link="base_link" />
+    <child
+      link="servo1" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="servo2">
+    <inertial>
+      <origin
+        xyz="-0.01159 -6.9584E-08 -0.025118"
+        rpy="0 0 0" />
+      <mass
+        value="0.11323" />
+      <inertia
+        ixx="3.6169E-05"
+        ixy="-4.7019E-10"
+        ixz="-1.6398E-07"
+        iyy="6.3328E-05"
+        iyz="-4.8085E-12"
+        izz="5.9619E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo2.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo2.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo2"
+    type="continuous">
+    <origin
+      xyz="-0.072 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="servo1" />
+    <child
+      link="servo2" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="servo3">
+    <inertial>
+      <origin
+        xyz="-0.01159 -6.9584E-08 -0.025118"
+        rpy="0 0 0" />
+      <mass
+        value="0.11323" />
+      <inertia
+        ixx="3.6169E-05"
+        ixy="-4.7019E-10"
+        ixz="-1.6398E-07"
+        iyy="6.3328E-05"
+        iyz="-4.8085E-12"
+        izz="5.9619E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo3.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo3.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo3"
+    type="continuous">
+    <origin
+      xyz="-0.072 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="servo2" />
+    <child
+      link="servo3" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="servo4">
+    <inertial>
+      <origin
+        xyz="-0.01159 -6.9584E-08 -0.025118"
+        rpy="0 0 0" />
+      <mass
+        value="0.11323" />
+      <inertia
+        ixx="3.6169E-05"
+        ixy="-4.7019E-10"
+        ixz="-1.6398E-07"
+        iyy="6.3328E-05"
+        iyz="-4.8085E-12"
+        izz="5.9619E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo4.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo4.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo4"
+    type="continuous">
+    <origin
+      xyz="-0.072 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="servo3" />
+    <child
+      link="servo4" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="servo5">
+    <inertial>
+      <origin
+        xyz="-0.01159 -6.9584E-08 -0.025118"
+        rpy="0 0 0" />
+      <mass
+        value="0.11323" />
+      <inertia
+        ixx="3.6169E-05"
+        ixy="-4.7019E-10"
+        ixz="-1.6398E-07"
+        iyy="6.3328E-05"
+        iyz="-4.8085E-12"
+        izz="5.9619E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo5.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo5.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo5"
+    type="continuous">
+    <origin
+      xyz="-0.072 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="servo4" />
+    <child
+      link="servo5" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+  <link
+    name="servo6">
+    <inertial>
+      <origin
+        xyz="-0.013811 2.5153E-17 -0.025129"
+        rpy="0 0 0" />
+      <mass
+        value="0.11626" />
+      <inertia
+        ixx="3.5103E-05"
+        ixy="2.7809E-20"
+        ixz="-3.1447E-07"
+        iyy="8.4443E-05"
+        iyz="1.5836E-20"
+        izz="8.1511E-05" />
+    </inertial>
+    <visual>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo6.STL" />
+      </geometry>
+      <material
+        name="">
+        <color
+          rgba="0.79216 0.81961 0.93333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin
+        xyz="0 0 0"
+        rpy="0 0 0" />
+      <geometry>
+        <mesh
+          filename="package://eel_urdf/meshes/servo6.STL" />
+      </geometry>
+    </collision>
+  </link>
+  <joint
+    name="servo6"
+    type="continuous">
+    <origin
+      xyz="-0.072 0 0"
+      rpy="0 0 0" />
+    <parent
+      link="servo5" />
+    <child
+      link="servo6" />
+    <axis
+      xyz="0 0 1" />
+    <limit
+      lower="0"
+      upper="0"
+      effort="0"
+      velocity="0" />
+  </joint>
+</robot>

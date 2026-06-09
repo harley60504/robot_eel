@@ -1,0 +1,38 @@
+﻿<mujoco>
+  <light directional="true" pos="0 0 5" dir="0 0 -1"
+         diffuse="0.6 0.6 0.6" specular="0.15 0.15 0.15"/>
+  <light pos="1.5 0.75 1" diffuse="0.15 0.2 0.25" specular="0 0 0"/>
+  <light pos="-1.5 0 1" diffuse="0.25 0.25 0.3" specular="0 0 0"/>
+
+  <!-- 3 m x 1.5 m tank centered at the world origin. MuJoCo plane sizes are visual half-extents. -->
+  <geom name="floor" pos="0 0 -0.5" size="1.5 0.75 0.1" type="plane" material="matplane" contype="1" conaffinity="1"/>
+  <geom name="water_surface" type="plane" pos="0 0 0" size="1.48 0.73 0.01" material="water_visual_mat" contype="0" conaffinity="0" group="1"/>
+
+  <geom name="course_bottom" type="capsule" fromto="-1.5 -0.75 0.01 1.5 -0.75 0.01" size="0.006"
+        rgba="1 0.15 0.05 0.9" contype="0" conaffinity="0" group="1"/>
+  <geom name="course_right" type="capsule" fromto="1.5 -0.75 0.01 1.5 0.75 0.01" size="0.006"
+        rgba="1 0.15 0.05 0.9" contype="0" conaffinity="0" group="1"/>
+  <geom name="course_top" type="capsule" fromto="1.5 0.75 0.01 -1.5 0.75 0.01" size="0.006"
+        rgba="1 0.15 0.05 0.9" contype="0" conaffinity="0" group="1"/>
+  <geom name="course_left" type="capsule" fromto="-1.5 0.75 0.01 -1.5 -0.75 0.01" size="0.006"
+        rgba="1 0.15 0.05 0.9" contype="0" conaffinity="0" group="1"/>
+
+  <!-- Collision boards around the 3 m x 1.5 m tank. Robot collision geoms use contype=2/conaffinity=1. -->
+  <geom name="wall_bottom" type="box" pos="0 -0.78 -0.02" size="1.53 0.03 0.08"
+        material="wall_brown_mat" contype="1" conaffinity="2" group="0"/>
+  <geom name="wall_top" type="box" pos="0 0.78 -0.02" size="1.53 0.03 0.08"
+        material="wall_brown_mat" contype="1" conaffinity="2" group="0"/>
+  <geom name="wall_left" type="box" pos="-1.53 0 -0.02" size="0.03 0.78 0.08"
+        material="wall_brown_mat" contype="1" conaffinity="2" group="0"/>
+  <geom name="wall_right" type="box" pos="1.53 0 -0.02" size="0.03 0.78 0.08"
+        material="wall_brown_mat" contype="1" conaffinity="2" group="0"/>
+
+  <geom name="start_marker" type="sphere" pos="-1.10 -0.35 0.02" size="0.025"
+        rgba="0 1 0 0.9" contype="0" conaffinity="0" group="1"/>
+  <geom name="corner_marker_1" type="sphere" pos="1.10 -0.35 0.02" size="0.018"
+        rgba="1 1 0 0.85" contype="0" conaffinity="0" group="1"/>
+  <geom name="corner_marker_2" type="sphere" pos="1.10 0.35 0.02" size="0.018"
+        rgba="1 1 0 0.85" contype="0" conaffinity="0" group="1"/>
+  <geom name="corner_marker_3" type="sphere" pos="-1.10 0.35 0.02" size="0.018"
+        rgba="1 1 0 0.85" contype="0" conaffinity="0" group="1"/>
+</mujoco>
