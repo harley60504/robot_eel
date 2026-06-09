@@ -94,6 +94,8 @@ def summarize(arr: np.ndarray, warmup_seconds: float):
     dy = float(y[end_idx] - y[start_idx])
     yaw_change = float(yaw[end_idx] - yaw[start_idx])
     speed = float(np.hypot(dx, dy) / dt)
+    forward_speed = dx / dt
+    lateral_speed = dy / dt
     yaw_rate = yaw_change / dt
     radius = math.inf if abs(yaw_rate) < 1e-9 else speed / abs(yaw_rate)
     return {
@@ -103,6 +105,8 @@ def summarize(arr: np.ndarray, warmup_seconds: float):
         "yaw_change_deg": math.degrees(yaw_change),
         "yaw_rate_rad_s": yaw_rate,
         "speed_m_s": speed,
+        "forward_speed_m_s": forward_speed,
+        "lateral_speed_m_s": lateral_speed,
         "turn_radius_m": radius,
         "warmup_index": start_idx,
     }

@@ -68,10 +68,11 @@ def put_text_block(image: np.ndarray, lines: list[str], origin: tuple[int, int],
 
 def real_summary_text(real_summary: dict, key: str):
     if key == "straight":
-        length_px = real_summary["length_px"]
-        distance_m = length_px / PX_PER_M
+        start_y = real_summary["line_start_px"][1]
+        end_y = real_summary["line_end_px"][1]
+        distance_m = abs(end_y - start_y) / PX_PER_M
         speed_m_s = distance_m / 13.0
-        return [f"Real: {real_summary['point_count']} pts", f"speed {speed_m_s:.3f} m/s", f"line RMSE {real_summary['rmse_px']:.1f}px"]
+        return [f"Real: {real_summary['point_count']} pts", f"forward {speed_m_s:.3f} m/s", f"line RMSE {real_summary['rmse_px']:.1f}px"]
     radius_m = real_summary["radius_px"] / PX_PER_M
     return [
         f"Real: {real_summary['point_count']} pts",
@@ -84,7 +85,8 @@ def sim_summary_text(sim_summary: dict, key: str):
     if key == "straight":
         straight = json.loads((ROOT / "outputs/fixed_gait_trajectories_3x1_5/summary.json").read_text(encoding="utf-8"))
         row = next(item for item in straight if item["name"] == "straight")
-        return [f"MuJoCo: {row['duration_s']:.2f}s to wall", f"speed {row['speed_m_s']:.3f} m/s", "line fit"]
+        forward_speed = row.get("forward_speed_m_s", row["dx"] / row["duration_s"])
+        return [f"MuJoCo: {row['duration_s']:.2f}s to wall", f"forward {forward_speed:.3f} m/s", "line fit"]
     return [
         "MuJoCo",
         f"R {sim_summary['radius']:.3f}m",

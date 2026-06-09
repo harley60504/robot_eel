@@ -42,12 +42,14 @@ python plot_fixed_gait_trajectories.py
 Rebuild fitted trajectory curves and real-vs-MuJoCo comparison panels:
 
 ```powershell
+python make_tracked_center_cleaned_physical.py
 python plot_fitted_gait_curves.py
 python track_video_start_to_wall.py
 python make_real_sim_comparison_panels.py
 ```
 
 The `R` shown on those comparison panels is the fitted trajectory-circle radius, not the body yaw-rate radius.
+`make_tracked_center_cleaned_physical.py` regenerates `outputs/video_analysis/<video_name>/tracked_center_summary_cleaned_physical.json` from the real video.
 
 Run rectangle-course measurement:
 
