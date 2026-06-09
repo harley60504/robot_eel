@@ -11,6 +11,18 @@ import numpy as np
 
 GAITS = ("straight", "turn_left", "turn_right", "spin_left", "spin_right")
 
+# Current 3 m x 1.5 m tank coordinate convention:
+#   MuJoCo x = forward direction, 0.0 m to 3.0 m
+#   MuJoCo y = lateral direction, -0.75 m to 0.75 m
+# rotate_sim_xy() maps this into plot/camera view:
+#   view x = lateral = -sim_y
+#   view y = forward = sim_x
+TANK_FORWARD_MIN = 0.0
+TANK_FORWARD_MAX = 3.0
+TANK_LATERAL_HALF = 0.75
+START_FORWARD_M = 0.60
+START_LATERAL_M = 0.0
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot fitted, rotated gait curves for sim and video comparison.")
@@ -18,12 +30,14 @@ def parse_args():
     parser.add_argument("--video-summary", type=Path, default=Path("outputs/video_analysis/clean_v_20260608_141254/tracked_center_summary_cleaned_physical.json"))
     parser.add_argument("--video", type=Path, default=Path("Release/python_backend/recordings/clean_v_20260608_141254.mp4"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/fitted_curve_comparison"))
+    parser.add_argument("--sim-only", action="store_true", help="Only plot MuJoCo sim fitted curves. Skip video comparison.")
     return parser.parse_args()
 
 
 def rotate_sim_xy(xy: np.ndarray) -> np.ndarray:
-    # MuJoCo starts left-to-right. Rotate into the camera-style view: start near bottom, swim upward.
-    # The camera image is mirrored laterally relative to MuJoCo's positive-y turn convention.
+    # MuJoCo forward is x. Rotate into camera-style view:
+    #   view lateral = -sim_y
+    #   view forward = sim_x
     return np.column_stack((-xy[:, 1], xy[:, 0]))
 
 
@@ -65,10 +79,22 @@ def fitted_curve(xy: np.ndarray, count: int = 240, force_circle: bool = False):
 
 
 def draw_rotated_tank(ax):
-    ax.add_patch(plt.Rectangle((-0.75, -1.5), 1.5, 3.0, fill=False, color="#7f1d1d", linewidth=1.5))
-    ax.scatter([0.0], [-0.9], s=32, color="#22c55e", edgecolor="black", zorder=4)
-    ax.set_xlim(-0.85, 0.85)
-    ax.set_ylim(-1.6, 1.6)
+    # View coordinates after rotate_sim_xy:
+    #   horizontal = lateral, -0.75 m to +0.75 m
+    #   vertical = forward, 0.0 m to 3.0 m
+    ax.add_patch(
+        plt.Rectangle(
+            (-TANK_LATERAL_HALF, TANK_FORWARD_MIN),
+            2.0 * TANK_LATERAL_HALF,
+            TANK_FORWARD_MAX - TANK_FORWARD_MIN,
+            fill=False,
+            color="#7f1d1d",
+            linewidth=1.5,
+        )
+    )
+    ax.scatter([START_LATERAL_M], [START_FORWARD_M], s=32, color="#22c55e", edgecolor="black", zorder=4)
+    ax.set_xlim(-TANK_LATERAL_HALF - 0.10, TANK_LATERAL_HALF + 0.10)
+    ax.set_ylim(TANK_FORWARD_MIN - 0.10, TANK_FORWARD_MAX + 0.10)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.22)
     ax.set_xlabel("lateral (m)")
@@ -151,12 +177,24 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     sim_rows = plot_sim_curves(root / args.sim_dir, out_dir)
-    video_path, video_fit = draw_video_fit(root / args.video, root / args.video_summary, out_dir)
     print(out_dir / "sim_fitted_curves_rotated.png")
-    print(video_path)
     for row in sim_rows:
         radius = "line" if row["radius"] is None else f"{row['radius']:.3f}m"
         print(f"{row['name']}: {row['kind']} radius={radius} arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f}")
+
+    if args.sim_only:
+        return
+
+    video_summary = root / args.video_summary
+    video_file = root / args.video
+    if not video_summary.exists() or not video_file.exists():
+        print("video comparison skipped: missing video summary or video file")
+        print(f"  video_summary={video_summary}")
+        print(f"  video={video_file}")
+        return
+
+    video_path, video_fit = draw_video_fit(video_file, video_summary, out_dir)
+    print(video_path)
     print(f"video_spin_left: {video_fit['kind']} radius_px={video_fit['radius']:.1f} arc={video_fit['arc_deg']:.1f}deg rmse_px={video_fit['rmse']:.1f}")
 
 

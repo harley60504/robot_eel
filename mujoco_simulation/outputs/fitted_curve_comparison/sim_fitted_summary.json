@@ -1,0 +1,37 @@
+[
+  {
+    "name": "straight",
+    "kind": "line",
+    "radius": null,
+    "rmse": 0.2346166945515813,
+    "arc_deg": 0.0
+  },
+  {
+    "name": "turn_left",
+    "kind": "circle",
+    "radius": 0.8018861649137575,
+    "rmse": 0.026561020317648464,
+    "arc_deg": 70.41190294007059
+  },
+  {
+    "name": "turn_right",
+    "kind": "circle",
+    "radius": 0.8373821397707608,
+    "rmse": 0.025237323924046377,
+    "arc_deg": 72.65913740258107
+  },
+  {
+    "name": "spin_left",
+    "kind": "circle",
+    "radius": 0.4812104411472659,
+    "rmse": 0.028673614353317722,
+    "arc_deg": 91.6231166024633
+  },
+  {
+    "name": "spin_right",
+    "kind": "circle",
+    "radius": 0.539005923269983,
+    "rmse": 0.026826431591492405,
+    "arc_deg": 88.44377589034825
+  }
+]
