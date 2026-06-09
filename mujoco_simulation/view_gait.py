@@ -17,7 +17,7 @@ def parse_args():
     parser.add_argument("gait", type=Path, help="Path to a gait JSON file.")
     parser.add_argument("--xml", default="eel.xml")
     parser.add_argument("--print-hz", type=float, default=2.0)
-    parser.add_argument("--start-x", type=float, default=-1.10)
+    parser.add_argument("--start-x", type=float, default=-0.9)
     parser.add_argument("--start-y", type=float, default=0.0)
     parser.add_argument("--reset-x", type=float, default=1.725)
     parser.add_argument("--reset-y", type=float, default=0.90)
