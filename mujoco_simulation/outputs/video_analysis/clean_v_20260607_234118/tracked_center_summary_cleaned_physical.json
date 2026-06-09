@@ -1,0 +1,16 @@
+{
+  "video": "C:\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260607_234118.mp4",
+  "video_name": "clean_v_20260607_234118.mp4",
+  "video_stem": "clean_v_20260607_234118",
+  "fps": 15.0,
+  "frame_count": 270,
+  "points": [],
+  "cleaned_points": [],
+  "detections": [],
+  "straight_distance_px": 0.0,
+  "path_distance_px": 0.0,
+  "point_count": 0,
+  "radius_px": null,
+  "arc_deg": 0.0,
+  "rmse_px": null
+}

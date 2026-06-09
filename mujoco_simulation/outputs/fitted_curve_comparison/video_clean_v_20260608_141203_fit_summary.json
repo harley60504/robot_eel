@@ -1,0 +1,16 @@
+{
+  "label": "real_turn_1",
+  "kind": "turn",
+  "video": "C:\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141203.mp4",
+  "summary": "C:\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260608_141203\\tracked_center_summary_cleaned_physical.json",
+  "point_count": 206,
+  "duration_s": 15.8,
+  "straight_distance_px": 76.98205399740901,
+  "path_distance_px": 538.8935993658561,
+  "net_dx_px": 75.98686440677966,
+  "net_dy_px": 12.338276836158192,
+  "fit_kind": "circle",
+  "radius_px": 37.41199416532401,
+  "rmse_px": 0.8649491331939498,
+  "arc_deg": 170.6151118773161
+}

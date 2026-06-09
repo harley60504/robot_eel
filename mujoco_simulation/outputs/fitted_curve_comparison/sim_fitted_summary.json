@@ -4,34 +4,69 @@
     "kind": "line",
     "radius": null,
     "rmse": 0.2346166945515813,
-    "arc_deg": 0.0
+    "arc_deg": 0.0,
+    "duration_s": 11.307999999999172,
+    "path_distance_m": 2.815360752472348,
+    "straight_distance_m": 2.263451930923531,
+    "mean_speed_m_s": 0.24897070679806813,
+    "forward_displacement_m": 2.2633456763819737,
+    "mean_forward_speed_m_s": 0.2001543753433091,
+    "lateral_drift_m": 0.021931548155286584
   },
   {
     "name": "turn_left",
     "kind": "circle",
     "radius": 0.8018861649137575,
     "rmse": 0.026561020317648464,
-    "arc_deg": 70.41190294007059
+    "arc_deg": 70.41190294007059,
+    "duration_s": 6.271000000000429,
+    "path_distance_m": 1.4230944408196236,
+    "straight_distance_m": 0.9610600815549509,
+    "mean_speed_m_s": 0.22693261693821182,
+    "forward_displacement_m": 0.7394926657544699,
+    "mean_forward_speed_m_s": 0.11792260656265657,
+    "lateral_drift_m": -0.6138298442188654
   },
   {
     "name": "turn_right",
     "kind": "circle",
     "radius": 0.8373821397707608,
     "rmse": 0.025237323924046377,
-    "arc_deg": 72.65913740258107
+    "arc_deg": 72.65913740258107,
+    "duration_s": 6.607000000000541,
+    "path_distance_m": 1.503857193734181,
+    "straight_distance_m": 1.0346972410779498,
+    "mean_speed_m_s": 0.22761573993250458,
+    "forward_displacement_m": 0.8333231794604545,
+    "mean_forward_speed_m_s": 0.1261273164008455,
+    "lateral_drift_m": 0.6133276932181035
   },
   {
     "name": "spin_left",
     "kind": "circle",
     "radius": 0.4812104411472659,
     "rmse": 0.028673614353317722,
-    "arc_deg": 91.6231166024633
+    "arc_deg": 91.6231166024633,
+    "duration_s": 5.6830000000002325,
+    "path_distance_m": 1.24301196793468,
+    "straight_distance_m": 0.7353244928399791,
+    "mean_speed_m_s": 0.2187246116372742,
+    "forward_displacement_m": 0.4028457113996654,
+    "mean_forward_speed_m_s": 0.07088610089735156,
+    "lateral_drift_m": -0.6151564374834015
   },
   {
     "name": "spin_right",
     "kind": "circle",
     "radius": 0.539005923269983,
     "rmse": 0.026826431591492405,
-    "arc_deg": 88.44377589034825
+    "arc_deg": 88.44377589034825,
+    "duration_s": 6.092000000000369,
+    "path_distance_m": 1.3094110941328492,
+    "straight_distance_m": 0.7719617390085668,
+    "mean_speed_m_s": 0.2149394442108946,
+    "forward_displacement_m": 0.46578734856090465,
+    "mean_forward_speed_m_s": 0.07645885564032771,
+    "lateral_drift_m": 0.6156030152734251
   }
 ]
