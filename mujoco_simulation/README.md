@@ -18,7 +18,7 @@ Rectangle course tests use:
 
 - `eel_rectangle.xml`
 - `view_rectangle_course.py`
-- an internal tracking rectangle at `x=±1.10`, `y=±0.35` inside the same `3 m x 1.5 m` tank
+- an internal tracking rectangle at `x=+/-1.10`, `y=+/-0.35` inside the same `3 m x 1.5 m` tank
 
 Tethered force/RL tests use:
 
