@@ -3,51 +3,44 @@
       <joint name="root_x" type="slide" pos="0 0 0" axis="1 0 0" limited="false" armature="0.01" damping="0.1" />
       <joint name="root_y" type="slide" pos="0 0 0" axis="0 1 0" limited="false" armature="0.01" damping="0.1" />
       <joint name="root_z_rot" type="hinge" pos="0 0 0" axis="0 0 1" limited="false" armature="0.01" damping="0.1" />
-      <inertial pos="0.062748 2.5587E-16 0.00026796" mass="0.083903" fullinertia="4.3479E-05 9.8485E-05 9.6089E-05 -1.3947E-21 5.4417E-08 -3.0251E-23" />
-      <geom name="base_link_collision" type="mesh" mesh="base_link_mesh" class="eel_collision_mesh" />
-      <geom name="base_link_fluid" type="capsule" fromto="0.000 0 0 0.120 0 0" size="0.030" class="eel_fluid_proxy" />
+      <inertial pos="0.062748 2.5587E-16 0.00026796" mass="0.260" fullinertia="1.347334E-04 3.051869E-04 2.977622E-04 -4.321919E-21 1.686283E-07 -9.374230E-23" />
+      <geom name="base_link_collision" type="mesh" mesh="base_link_mesh" class="eel_collision_fluid" />
       <geom name="base_link_visual" type="mesh" mesh="base_link_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
       <body name="servo1" pos="-0.035 0 0.025706">
         <geom name="servo1_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
         <inertial pos="-0.01159 -6.9584E-08 -0.025118" mass="0.11323" fullinertia="3.6169E-05 6.3328E-05 5.9619E-05 -4.7019E-10 -1.6398E-07 -4.8085E-12" />
         <joint name="servo1" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-        <geom name="servo1_collision" type="mesh" mesh="servo1_mesh" class="eel_collision_mesh" />
-        <geom name="servo1_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+        <geom name="servo1_collision" type="mesh" mesh="servo1_mesh" class="eel_collision_fluid" />
         <geom name="servo1_visual" type="mesh" mesh="servo1_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
         <body name="servo2" pos="-0.072 0 0">
           <geom name="servo2_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
           <inertial pos="-0.01159 -6.9584E-08 -0.025118" mass="0.11323" fullinertia="3.6169E-05 6.3328E-05 5.9619E-05 -4.7019E-10 -1.6398E-07 -4.8085E-12" />
           <joint name="servo2" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-          <geom name="servo2_collision" type="mesh" mesh="servo2_mesh" class="eel_collision_mesh" />
-          <geom name="servo2_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+          <geom name="servo2_collision" type="mesh" mesh="servo2_mesh" class="eel_collision_fluid" />
           <geom name="servo2_visual" type="mesh" mesh="servo2_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
           <body name="servo3" pos="-0.072 0 0">
             <geom name="servo3_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
             <inertial pos="-0.01159 -6.9584E-08 -0.025118" mass="0.11323" fullinertia="3.6169E-05 6.3328E-05 5.9619E-05 -4.7019E-10 -1.6398E-07 -4.8085E-12" />
             <joint name="servo3" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-            <geom name="servo3_collision" type="mesh" mesh="servo3_mesh" class="eel_collision_mesh" />
-            <geom name="servo3_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+            <geom name="servo3_collision" type="mesh" mesh="servo3_mesh" class="eel_collision_fluid" />
             <geom name="servo3_visual" type="mesh" mesh="servo3_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
             <body name="servo4" pos="-0.072 0 0">
               <geom name="servo4_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
               <inertial pos="-0.01159 -6.9584E-08 -0.025118" mass="0.11323" fullinertia="3.6169E-05 6.3328E-05 5.9619E-05 -4.7019E-10 -1.6398E-07 -4.8085E-12" />
               <joint name="servo4" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-              <geom name="servo4_collision" type="mesh" mesh="servo4_mesh" class="eel_collision_mesh" />
-              <geom name="servo4_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+              <geom name="servo4_collision" type="mesh" mesh="servo4_mesh" class="eel_collision_fluid" />
               <geom name="servo4_visual" type="mesh" mesh="servo4_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
               <body name="servo5" pos="-0.072 0 0">
                 <geom name="servo5_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
                 <inertial pos="-0.01159 -6.9584E-08 -0.025118" mass="0.11323" fullinertia="3.6169E-05 6.3328E-05 5.9619E-05 -4.7019E-10 -1.6398E-07 -4.8085E-12" />
                 <joint name="servo5" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-                <geom name="servo5_collision" type="mesh" mesh="servo5_mesh" class="eel_collision_mesh" />
-                <geom name="servo5_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+                <geom name="servo5_collision" type="mesh" mesh="servo5_mesh" class="eel_collision_fluid" />
                 <geom name="servo5_visual" type="mesh" mesh="servo5_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
                 <body name="servo6" pos="-0.072 0 0">
                   <geom name="servo6_joint_marker" type="sphere" size="0.008" pos="0 0 0" material="joint_marker_red" contype="0" conaffinity="0" group="2" />
                   <inertial pos="-0.013811 2.5153E-17 -0.025129" mass="0.11626" fullinertia="3.5103E-05 8.4443E-05 8.1511E-05 2.7809E-20 -3.1447E-07 1.5836E-20" />
                   <joint name="servo6" pos="0 0 0" axis="0 0 -1" range="-1.5 1.5" actuatorfrcrange="-10 10" armature="0.05" damping="1.5" />
-                  <geom name="servo6_collision" type="mesh" mesh="servo6_mesh" class="eel_collision_mesh" />
-                  <geom name="servo6_fluid" type="capsule" fromto="-0.070 0 0 -0.005 0 0" size="0.030" class="eel_fluid_proxy" />
+                  <geom name="servo6_collision" type="mesh" mesh="servo6_mesh" class="eel_collision_fluid" />
                   <geom name="servo6_visual" type="mesh" mesh="servo6_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
                 </body>
               </body>
