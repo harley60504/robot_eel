@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import threading
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from make_tracked_center_cleaned_physical import (
-    DEFAULT_OUT_ROOT,
     DEFAULT_PREVIEW_NAME,
     DEFAULT_PX_PER_M,
     DEFAULT_RECORDINGS_DIR,
@@ -17,6 +18,12 @@ from make_tracked_center_cleaned_physical import (
     resolve_recordings_dir,
     resolve_video,
 )
+
+
+DEFAULT_PIPELINE_ROOT = Path("../gui_pipeline_outputs")
+REAL_SUBDIR = "real_video_analysis"
+SIM_SUBDIR = "fixed_gait_trajectories_3x1_5"
+FIT_SUBDIR = "fitted_curve_comparison"
 
 
 class TextLogger:
@@ -34,12 +41,12 @@ class TextLogger:
 class RealVideoAnalysisApp:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Robot Eel Real Video Analysis - Legacy Tracker")
-        self.root.geometry("900x640")
+        self.root.title("Robot Eel Real + MuJoCo Gait Pipeline")
+        self.root.geometry("980x700")
 
         self.recordings_var = tk.StringVar(value=str(DEFAULT_RECORDINGS_DIR))
         self.video_var = tk.StringVar()
-        self.out_var = tk.StringVar(value=str(DEFAULT_OUT_ROOT))
+        self.out_var = tk.StringVar(value=str(DEFAULT_PIPELINE_ROOT))
         self.px_per_m_var = tk.StringVar(value=f"{DEFAULT_PX_PER_M:.6f}")
         self.preview_var = tk.BooleanVar(value=True)
 
@@ -63,38 +70,49 @@ class RealVideoAnalysisApp:
 
         out_row = ttk.Frame(outer)
         out_row.pack(fill=tk.X, pady=4)
-        ttk.Label(out_row, text="Output root").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(out_row, text="Pipeline output root").pack(side=tk.LEFT, padx=(0, 8))
         ttk.Entry(out_row, textvariable=self.out_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(out_row, text="Browse", command=self.browse_output).pack(side=tk.LEFT, padx=(8, 0))
 
-        options = ttk.LabelFrame(outer, text="Analysis options", padding=10)
+        options = ttk.LabelFrame(outer, text="Options", padding=10)
         options.pack(fill=tk.X, pady=10)
         ttk.Label(options, text="px_per_m").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
         ttk.Entry(options, textvariable=self.px_per_m_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Checkbutton(options, text=f"Write preview PNG ({DEFAULT_PREVIEW_NAME})", variable=self.preview_var).grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Checkbutton(options, text=f"Write real preview PNG ({DEFAULT_PREVIEW_NAME})", variable=self.preview_var).grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
         ttk.Label(
             options,
-            text="Uses the same legacy start-to-wall tracker that produced the correct R values. Straight speed uses fitted-line forward displacement only.",
+            text="Output is separated under the selected root folder: real_video_analysis, fixed_gait_trajectories_3x1_5, fitted_curve_comparison.",
         ).grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(
+            options,
+            text="Straight real speed uses fitted-line forward displacement only; lateral drift is not counted as forward speed.",
+        ).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
 
         button_row = ttk.Frame(outer)
         button_row.pack(fill=tk.X, pady=8)
         self.single_button = ttk.Button(button_row, text="Analyze selected MP4", command=self.start_single)
         self.single_button.pack(side=tk.LEFT)
-        self.batch_button = ttk.Button(button_row, text="Analyze default 3 videos", command=self.start_batch)
-        self.batch_button.pack(side=tk.LEFT, padx=8)
-        ttk.Button(button_row, text="Open output folder", command=self.open_output_folder).pack(side=tk.LEFT, padx=8)
+        self.real3_button = ttk.Button(button_row, text="Analyze real 3 videos", command=self.start_real3)
+        self.real3_button.pack(side=tk.LEFT, padx=6)
+        self.sim_button = ttk.Button(button_row, text="Run MuJoCo fixed gait", command=self.start_sim)
+        self.sim_button.pack(side=tk.LEFT, padx=6)
+        self.curve_button = ttk.Button(button_row, text="Plot fitted curves", command=self.start_curves)
+        self.curve_button.pack(side=tk.LEFT, padx=6)
+        self.full_button = ttk.Button(button_row, text="Run full pipeline", command=self.start_full)
+        self.full_button.pack(side=tk.LEFT, padx=6)
+        ttk.Button(button_row, text="Open output root", command=self.open_output_folder).pack(side=tk.LEFT, padx=6)
 
-        self.log = tk.Text(outer, height=22, wrap=tk.WORD)
+        self.log = tk.Text(outer, height=24, wrap=tk.WORD)
         self.log.pack(fill=tk.BOTH, expand=True)
         self.logger = TextLogger(self.log)
-        self.logger.write("Legacy real-video tracker GUI ready.\n")
-        self.logger.write("Default 3 videos:\n")
+        self.logger.write("Robot eel gait pipeline GUI ready.\n")
+        self.logger.write("Default 3 real videos:\n")
         for stem in DEFAULT_VIDEO_STEMS:
             self.logger.write(f"  - {stem}.mp4\n")
-        self.logger.write("\nOutputs per video:\n")
-        self.logger.write("  tracked_center_summary_cleaned_physical.json\n")
-        self.logger.write("  tracked_center_overlay_cleaned_physical.png\n")
+        self.logger.write("\nPipeline folders under output root:\n")
+        self.logger.write(f"  {REAL_SUBDIR}/\n")
+        self.logger.write(f"  {SIM_SUBDIR}/\n")
+        self.logger.write(f"  {FIT_SUBDIR}/\n")
 
     def browse_recordings(self) -> None:
         dirname = filedialog.askdirectory(title="Select recordings folder")
@@ -110,12 +128,27 @@ class RealVideoAnalysisApp:
             self.video_var.set(filename)
 
     def browse_output(self) -> None:
-        dirname = filedialog.askdirectory(title="Select output folder")
+        dirname = filedialog.askdirectory(title="Select pipeline output root")
         if dirname:
             self.out_var.set(dirname)
 
+    def output_root(self) -> Path:
+        return resolve_path(Path(self.out_var.get()).expanduser())
+
+    def real_out_dir(self) -> Path:
+        return self.output_root() / REAL_SUBDIR
+
+    def sim_out_dir(self) -> Path:
+        return self.output_root() / SIM_SUBDIR
+
+    def fit_out_dir(self) -> Path:
+        return self.output_root() / FIT_SUBDIR
+
+    def recordings_dir(self) -> Path:
+        return resolve_recordings_dir(Path(self.recordings_var.get()).expanduser())
+
     def open_output_folder(self) -> None:
-        path = Path(self.out_var.get()).expanduser().resolve()
+        path = self.output_root()
         path.mkdir(parents=True, exist_ok=True)
         try:
             import os
@@ -126,53 +159,40 @@ class RealVideoAnalysisApp:
 
     def set_buttons(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
-        self.single_button.configure(state=state)
-        self.batch_button.configure(state=state)
+        for button in (self.single_button, self.real3_button, self.sim_button, self.curve_button, self.full_button):
+            button.configure(state=state)
 
     def start_single(self) -> None:
         video = self.video_var.get().strip()
         if not video:
             messagebox.showerror("Missing MP4", "Please select one MP4 file first.")
             return
-        self.set_buttons(False)
-        thread = threading.Thread(target=self._worker, args=([Path(video)],), daemon=True)
-        thread.start()
+        self._start_thread(self._run_real_videos, [Path(video)])
 
-    def start_batch(self) -> None:
-        self.set_buttons(False)
-        recordings_dir = resolve_recordings_dir(Path(self.recordings_var.get()).expanduser())
+    def start_real3(self) -> None:
+        recordings_dir = self.recordings_dir()
         videos = [resolve_video(f"{stem}.mp4", recordings_dir) for stem in DEFAULT_VIDEO_STEMS]
-        thread = threading.Thread(target=self._worker, args=(videos,), daemon=True)
+        self._start_thread(self._run_real_videos, videos)
+
+    def start_sim(self) -> None:
+        self._start_thread(self._run_simulation)
+
+    def start_curves(self) -> None:
+        self._start_thread(self._run_fitted_curves)
+
+    def start_full(self) -> None:
+        recordings_dir = self.recordings_dir()
+        videos = [resolve_video(f"{stem}.mp4", recordings_dir) for stem in DEFAULT_VIDEO_STEMS]
+        self._start_thread(self._run_full_pipeline, videos)
+
+    def _start_thread(self, func, *args) -> None:
+        self.set_buttons(False)
+        thread = threading.Thread(target=self._safe_worker, args=(func, *args), daemon=True)
         thread.start()
 
-    def _worker(self, videos: list[Path]) -> None:
+    def _safe_worker(self, func, *args) -> None:
         try:
-            out_root = resolve_path(Path(self.out_var.get()).expanduser())
-            out_root.mkdir(parents=True, exist_ok=True)
-            px_per_m = float(self.px_per_m_var.get())
-            write_preview = bool(self.preview_var.get())
-
-            self.logger.write("\n=== Analysis started ===\n")
-            self.logger.write(f"out_root={out_root}\n")
-            self.logger.write(f"px_per_m={px_per_m:.6f}\n")
-
-            for video_path in videos:
-                video_path = video_path.expanduser().resolve()
-                self.logger.write(f"\nVideo: {video_path}\n")
-                if not video_path.exists():
-                    self.logger.write("  SKIP: file not found\n")
-                    continue
-
-                process_video(
-                    video_path=video_path,
-                    out_root=out_root,
-                    write_preview=write_preview,
-                    px_per_m=px_per_m,
-                )
-                summary_path = out_root / video_path.stem / "tracked_center_summary_cleaned_physical.json"
-                result = json.loads(summary_path.read_text(encoding="utf-8"))
-                self._log_result(result)
-
+            func(*args)
             self.logger.write("\n=== Done ===\n")
         except Exception as exc:
             self.logger.write(f"\nERROR: {exc}\n")
@@ -180,13 +200,74 @@ class RealVideoAnalysisApp:
         finally:
             self.root.after(0, lambda: self.set_buttons(True))
 
-    def _log_result(self, result: dict) -> None:
+    def _run_real_videos(self, videos: list[Path]) -> None:
+        out_root = self.real_out_dir()
+        out_root.mkdir(parents=True, exist_ok=True)
+        px_per_m = float(self.px_per_m_var.get())
+        write_preview = bool(self.preview_var.get())
+
+        self.logger.write("\n=== Real video tracking ===\n")
+        self.logger.write(f"out_root={out_root}\n")
+        self.logger.write(f"px_per_m={px_per_m:.6f}\n")
+
+        for video_path in videos:
+            video_path = video_path.expanduser().resolve()
+            self.logger.write(f"\nVideo: {video_path}\n")
+            if not video_path.exists():
+                self.logger.write("  SKIP: file not found\n")
+                continue
+            process_video(video_path=video_path, out_root=out_root, write_preview=write_preview, px_per_m=px_per_m)
+            summary_path = out_root / video_path.stem / "tracked_center_summary_cleaned_physical.json"
+            result = json.loads(summary_path.read_text(encoding="utf-8"))
+            self._log_real_result(result, summary_path)
+
+    def _run_simulation(self) -> None:
+        sim_out = self.sim_out_dir()
+        sim_out.mkdir(parents=True, exist_ok=True)
+        self.logger.write("\n=== MuJoCo fixed gait trajectories ===\n")
+        self._run_command([sys.executable, "plot_fixed_gait_trajectories.py", "--out-dir", str(sim_out)])
+
+    def _run_fitted_curves(self) -> None:
+        real_out = self.real_out_dir()
+        sim_out = self.sim_out_dir()
+        fit_out = self.fit_out_dir()
+        fit_out.mkdir(parents=True, exist_ok=True)
+        self.logger.write("\n=== Fitted gait curves / real-vs-sim comparison ===\n")
+        self._run_command(
+            [
+                sys.executable,
+                "plot_fitted_gait_curves.py",
+                "--sim-dir",
+                str(sim_out),
+                "--video-analysis-dir",
+                str(real_out),
+                "--recordings-dir",
+                str(self.recordings_dir()),
+                "--out-dir",
+                str(fit_out),
+            ]
+        )
+
+    def _run_full_pipeline(self, videos: list[Path]) -> None:
+        self.logger.write("\n=== Full pipeline ===\n")
+        self._run_real_videos(videos)
+        self._run_simulation()
+        self._run_fitted_curves()
+
+    def _run_command(self, cmd: list[str]) -> None:
+        self.logger.write("CMD: " + " ".join(cmd) + "\n")
+        proc = subprocess.run(cmd, cwd=Path.cwd(), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        if proc.stdout:
+            self.logger.write(proc.stdout)
+        if proc.returncode != 0:
+            raise RuntimeError(f"Command failed with exit code {proc.returncode}: {' '.join(cmd)}")
+
+    def _log_real_result(self, result: dict, summary_path: Path) -> None:
         self.logger.write(f"  points={result.get('point_count')} fit={result.get('fit_kind')}\n")
         if result.get("fit_kind") == "circle":
-            radius_px = result.get("radius_px")
-            radius_m = result.get("radius_m")
             self.logger.write(
-                f"  R={radius_px:.3f}px = {radius_m:.4f}m, arc={result.get('arc_deg'):.3f}deg, rmse={result.get('rmse_px'):.3f}px\n"
+                f"  R={result.get('radius_px'):.3f}px = {result.get('radius_m'):.4f}m, "
+                f"arc={result.get('arc_deg'):.3f}deg, rmse={result.get('rmse_px'):.3f}px\n"
             )
         else:
             speed = result.get("forward_speed_m_s")
@@ -195,17 +276,10 @@ class RealVideoAnalysisApp:
                 f"  forward={result.get('forward_distance_m'):.4f}m, speed={speed_text}, line_rmse={result.get('rmse_px'):.3f}px\n"
             )
             self.logger.write("  speed source: fitted-line vertical forward displacement, not left-right drift.\n")
-        self.logger.write(f"  JSON: {out_or_blank(result.get('video'), result)}\n")
+        self.logger.write(f"  JSON: {summary_path}\n")
         preview = result.get("preview_image")
         if preview:
             self.logger.write(f"  Preview: {preview}\n")
-
-
-def out_or_blank(_video: str | None, result: dict) -> str:
-    video_stem = result.get("video_stem")
-    if not video_stem:
-        return ""
-    return str(Path(result.get("preview_image", "")).parent / "tracked_center_summary_cleaned_physical.json")
 
 
 def main() -> None:
