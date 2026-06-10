@@ -21,6 +21,7 @@ def parse_args():
     parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
     parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
     parser.add_argument("--print-contacts", action="store_true")
+    parser.add_argument("--viewer-fps", type=float, default=60.0, help="Viewer render FPS used for real-time pacing.")
     parser.add_argument(
         "--contact-ignore-seconds",
         type=float,
@@ -63,7 +64,6 @@ def main():
     }
     wall_geom_ids.discard(-1)
 
-    cpg = HopfCPG(num_joints=6)
     ajoint_deg = float(gait["ajoint"])
     ajoint_rad = degrees_to_radians(ajoint_deg)
     cpg_params = HopfCPGParams(
@@ -74,6 +74,7 @@ def main():
         phase_lags=tuple(float(value) for value in gait["phase_lags"]),
         joint_bias=tuple(float(value) for value in gait["joint_bias"]),
     )
+    cpg = HopfCPG(num_joints=6, params=cpg_params)
 
     gait_name = gait.get("name", args.gait.stem)
     last_print = 0.0
@@ -89,6 +90,7 @@ def main():
     )
     print("  joint_bias=", ", ".join(f"{value:.3f}" for value in cpg_params.joint_bias or ()), flush=True)
     print("  MuJoCo adapter: servo joint axes are axis=\"0 0 -1\" in eel.xml", flush=True)
+    print("  viewer pacing: real-time wall-clock pacing with batched MuJoCo steps", flush=True)
     print("  wall behavior: reset on wall contact and keep swimming", flush=True)
     print("  R measurement: disabled; use plot_fixed_gait_trajectories.py + plot_fitted_gait_curves.py", flush=True)
 
@@ -123,23 +125,36 @@ def main():
             viewer.cam.elevation = -70
             viewer.cam.azimuth = 0
 
+        target_fps = max(args.viewer_fps, 1.0)
+        frame_dt = 1.0 / target_fps
+        last_wall_clock = time.perf_counter()
+
         while viewer.is_running():
-            targets = cpg.step(data.time, model.opt.timestep, cpg_params)
-            data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
-            mujoco.mj_step(model, data)
+            frame_start = time.perf_counter()
+            wall_dt = min(frame_start - last_wall_clock, 0.05)
+            last_wall_clock = frame_start
+
+            target_sim_time = data.time + wall_dt
             base_pos = data.xpos[base_body_id]
 
-            hit_wall, contact_examples = detect_wall_contact()
-            if hit_wall and data.time >= args.contact_ignore_seconds:
-                if args.print_contacts:
-                    examples = sorted(set(contact_examples))[:3]
-                    print(f"wall contact: {examples}", flush=True)
-                else:
-                    print(f"wall contact: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
-
-                print("reset to start", flush=True)
-                reset_to_start()
+            while data.time + 1e-12 < target_sim_time:
+                targets = cpg.step(data.time, model.opt.timestep, cpg_params)
+                data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
+                mujoco.mj_step(model, data)
                 base_pos = data.xpos[base_body_id]
+
+                hit_wall, contact_examples = detect_wall_contact()
+                if hit_wall and data.time >= args.contact_ignore_seconds:
+                    if args.print_contacts:
+                        examples = sorted(set(contact_examples))[:3]
+                        print(f"wall contact: {examples}", flush=True)
+                    else:
+                        print(f"wall contact: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
+
+                    print("reset to start", flush=True)
+                    reset_to_start()
+                    base_pos = data.xpos[base_body_id]
+                    break
 
             now = time.time()
             if now - last_print >= print_period:
@@ -156,7 +171,11 @@ def main():
                 viewer.cam.lookat[0] = base_pos[0]
                 viewer.cam.lookat[1] = base_pos[1]
             viewer.sync()
-            time.sleep(model.opt.timestep)
+
+            elapsed = time.perf_counter() - frame_start
+            sleep_time = frame_dt - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
 
 if __name__ == "__main__":
