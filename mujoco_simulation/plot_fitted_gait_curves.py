@@ -185,9 +185,15 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=3.0)
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
-        radius_text = "R=∞ m" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
-        speed_text = f"v={metrics['mean_speed_m_s']:.3f} m/s"
-        ax.set_title(f"{name} fitted curve ({radius_text}, {speed_text})")
+        if name == "straight":
+            radius_text = "R=∞ m"
+            distance_text = f"d_forward={metrics['forward_displacement_m']:.3f} m"
+            speed_text = f"v_forward={metrics['mean_forward_speed_m_s']:.3f} m/s"
+            ax.set_title(f"{name} fitted curve ({radius_text}, {distance_text}, {speed_text})")
+        else:
+            radius_text = "R=∞ m" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
+            speed_text = f"v={metrics['mean_speed_m_s']:.3f} m/s"
+            ax.set_title(f"{name} fitted curve ({radius_text}, {speed_text})")
         fig.tight_layout()
         fig.savefig(out_dir / f"sim_{name}_fitted_rotated.png")
         plt.close(fig)
@@ -451,18 +457,26 @@ def main():
 
     for row in sim_rows:
         radius = "R=∞m" if row["radius"] is None else f"R={row['radius']:.3f}m"
-        print(
-            f"{row['name']}: {row['kind']} {radius} "
-            f"arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} "
-            f"speed={row['mean_speed_m_s']:.3f}m/s "
-            f"forward_speed={row['mean_forward_speed_m_s']:.3f}m/s"
-        )
+        if row["name"] == "straight":
+            print(
+                f"{row['name']}: line R=∞m "
+                f"forward_distance={row['forward_displacement_m']:.3f}m "
+                f"forward_speed={row['mean_forward_speed_m_s']:.3f}m/s "
+                f"lateral_drift={row['lateral_drift_m']:.3f}m "
+                f"rmse={row['rmse']:.4f}"
+            )
+        else:
+            print(
+                f"{row['name']}: {row['kind']} {radius} "
+                f"arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} "
+                f"speed={row['mean_speed_m_s']:.3f}m/s"
+            )
 
     straight_row = next((row for row in sim_rows if row["name"] == "straight"), None)
     if straight_row is not None:
         print("\nSim straight swimming speed summary")
-        print(f"  mean path speed       = {straight_row['mean_speed_m_s']:.4f} m/s")
-        print(f"  mean forward speed    = {straight_row['mean_forward_speed_m_s']:.4f} m/s")
+        print(f"  mean path speed       = {straight_row['mean_speed_m_s']:.4f} m/s  (includes lateral oscillation)")
+        print(f"  mean forward speed    = {straight_row['mean_forward_speed_m_s']:.4f} m/s  (used for straight figure)")
         print(f"  forward displacement  = {straight_row['forward_displacement_m']:.4f} m")
         print(f"  lateral drift         = {straight_row['lateral_drift_m']:.4f} m")
         print(f"  duration              = {straight_row['duration_s']:.4f} s")
