@@ -23,7 +23,7 @@ REAL_VIDEO_CONFIGS = (
         "kind": "turn",
     },
     {
-        "stem": "clean_v_20260607_234118",
+        "stem": "clean_v_20260607_233739",
         "label": "real_straight",
         "kind": "straight",
     },
@@ -34,6 +34,7 @@ TANK_FORWARD_MAX = 3.0
 TANK_LATERAL_HALF = 0.75
 START_FORWARD_M = 0.60
 START_LATERAL_M = 0.0
+PX_PER_M = 875.0 / 1.5
 
 
 def parse_args():
@@ -184,7 +185,7 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=3.0)
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
-        radius_text = "line" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
+        radius_text = "R=∞ m" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
         speed_text = f"v={metrics['mean_speed_m_s']:.3f} m/s"
         ax.set_title(f"{name} fitted curve ({radius_text}, {speed_text})")
         fig.tight_layout()
@@ -237,6 +238,30 @@ def point_distance_metrics(points: np.ndarray) -> dict:
     }
 
 
+def safe_read_summary(summary_path: Path) -> dict:
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def real_speed_from_summary(summary_data: dict, distance_metrics: dict) -> float | None:
+    if summary_data.get("forward_speed_m_s") is not None:
+        return float(summary_data["forward_speed_m_s"])
+    duration = float(distance_metrics.get("duration_s", 0.0))
+    if duration <= 1e-9:
+        return None
+    return float(distance_metrics.get("path_distance_px", 0.0)) / PX_PER_M / duration
+
+
+def put_metric_label(frame, lines: list[str], org=(40, 70)) -> None:
+    x, y = org
+    for line in lines:
+        cv2.putText(frame, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 5, cv2.LINE_AA)
+        cv2.putText(frame, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
+        y += 34
+
+
 def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str, summary_path: Path):
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
@@ -283,6 +308,7 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
 
     xy = points[:, 1:3]
     distance_metrics = point_distance_metrics(points)
+    summary_data = safe_read_summary(summary_path)
 
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
@@ -310,17 +336,23 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
             cv2.circle(frame, tuple(poly[0]), 9, (0, 255, 0), -1, cv2.LINE_AA)
             cv2.circle(frame, tuple(poly[-1]), 9, (0, 0, 255), -1, cv2.LINE_AA)
 
+        radius_m = None if fit["radius"] is None else float(fit["radius"]) / PX_PER_M
+        speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
         summary.update(
             {
                 "fit_kind": fit["kind"],
                 "radius_px": fit["radius"],
+                "radius_m": radius_m,
                 "rmse_px": fit["rmse"],
+                "rmse_m": fit["rmse"] / PX_PER_M,
                 "arc_deg": fit["arc_deg"],
+                "speed_m_s": speed_m_s,
             }
         )
 
-        radius_text = "nan" if fit["radius"] is None else f"{fit['radius']:.1f} px"
-        cv2.putText(frame, f"{label}: R={radius_text}", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
+        radius_text = "nan" if radius_m is None else f"{radius_m:.3f} m"
+        speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
+        put_metric_label(frame, [f"{label}: R={radius_text}", f"v={speed_text}, RMSE={fit['rmse']:.1f}px"])
         out_img = out_dir / f"video_{stem}_fit_curve.png"
         out_json = out_dir / f"video_{stem}_fit_summary.json"
 
@@ -333,7 +365,21 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
             cv2.circle(frame, end, 10, (0, 0, 255), -1, cv2.LINE_AA)
             cv2.line(frame, start, end, (255, 0, 0), 3, cv2.LINE_AA)
 
-        cv2.putText(frame, f"{label}: distance={distance_metrics['straight_distance_px']:.1f} px", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
+        speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
+        forward_m = summary_data.get("forward_distance_m")
+        if forward_m is None:
+            forward_m = distance_metrics["straight_distance_px"] / PX_PER_M
+        summary.update(
+            {
+                "fit_kind": "line",
+                "radius_m": None,
+                "forward_distance_m": float(forward_m),
+                "forward_speed_m_s": speed_m_s,
+                "rmse_px": summary_data.get("rmse_px"),
+            }
+        )
+        speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
+        put_metric_label(frame, [f"{label}: R=∞ m", f"v={speed_text}, forward={float(forward_m):.3f} m"])
         out_img = out_dir / f"video_{stem}_straight_distance.png"
         out_json = out_dir / f"video_{stem}_straight_distance_summary.json"
 
@@ -367,17 +413,21 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
             continue
 
         if kind == "turn":
-            radius = "nan" if summary.get("radius_px") is None else f"{summary['radius_px']:.3f}px"
+            radius = "nan" if summary.get("radius_m") is None else f"{summary['radius_m']:.3f}m"
+            speed = "nan" if summary.get("speed_m_s") is None else f"{summary['speed_m_s']:.3f}m/s"
             print(
                 f"{label}: radius={radius} "
+                f"speed={speed} "
                 f"arc={summary.get('arc_deg', 0.0):.1f}deg "
                 f"rmse={summary.get('rmse_px', 0.0):.3f}px "
                 f"points={summary['point_count']}"
             )
         else:
+            speed = "nan" if summary.get("forward_speed_m_s") is None else f"{summary['forward_speed_m_s']:.3f}m/s"
             print(
-                f"{label}: straight_distance={summary['straight_distance_px']:.3f}px "
-                f"path_distance={summary['path_distance_px']:.3f}px "
+                f"{label}: R=inf "
+                f"speed={speed} "
+                f"forward={summary.get('forward_distance_m', 0.0):.3f}m "
                 f"duration={summary['duration_s']:.3f}s "
                 f"points={summary['point_count']}"
             )
@@ -400,9 +450,9 @@ def main():
     print(out_dir / "sim_fitted_curves_rotated.png")
 
     for row in sim_rows:
-        radius = "line" if row["radius"] is None else f"{row['radius']:.3f}m"
+        radius = "R=∞m" if row["radius"] is None else f"R={row['radius']:.3f}m"
         print(
-            f"{row['name']}: {row['kind']} radius={radius} "
+            f"{row['name']}: {row['kind']} {radius} "
             f"arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} "
             f"speed={row['mean_speed_m_s']:.3f}m/s "
             f"forward_speed={row['mean_forward_speed_m_s']:.3f}m/s"
