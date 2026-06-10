@@ -27,7 +27,7 @@ Tethered force/RL tests use:
 
 ## Common Commands
 
-Open the GUI:
+Open the MuJoCo gait GUI:
 
 ```powershell
 python gait_gui.py
@@ -37,6 +37,50 @@ Run all fixed gaits:
 
 ```powershell
 python plot_fixed_gait_trajectories.py
+```
+
+## Single-MP4 real video analysis GUI
+
+Use this GUI when you want to choose any MP4 manually and compute either turning radius or straight forward speed:
+
+```powershell
+cd C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation
+python real_video_analysis_gui.py
+```
+
+GUI options:
+
+- `MP4 file`: choose the video to analyze.
+- `Fit mode = circle`: use this for turning videos. It outputs fitted trajectory radius `R` in both pixels and meters.
+- `Fit mode = line`: use this for straight swimming. It outputs forward distance and forward speed.
+- `Marker mode = red`: use this when tracking a red marker.
+- `Marker mode = dark`: use this when tracking a dark/black body marker.
+- `px_per_m`: pixel-to-meter scale. Default is `875 / 1.5 = 583.333 px/m`.
+
+Outputs are written under:
+
+```text
+outputs/gui_video_analysis/<video_name>/analysis_summary_m.json
+outputs/gui_video_analysis/<video_name>/analysis_overlay.png
+```
+
+For turning videos, use `analysis_summary_m.json` fields:
+
+```text
+radius_px
+radius_m
+arc_deg
+rmse_px
+rmse_m
+```
+
+For straight videos, use:
+
+```text
+forward_distance_m
+forward_speed_m_s
+line_length_m
+rmse_m
 ```
 
 ## Automated real-video / MuJoCo comparison workflow
