@@ -186,10 +186,20 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
         if name == "straight":
-            radius_text = "R=∞ m"
-            distance_text = f"d_forward={metrics['forward_displacement_m']:.3f} m"
-            speed_text = f"v_forward={metrics['mean_forward_speed_m_s']:.3f} m/s"
-            ax.set_title(f"{name} fitted curve ({radius_text}, {distance_text}, {speed_text})")
+            ax.set_title("straight fitted curve")
+            ax.text(
+                0.03,
+                0.97,
+                "R = ∞ m\n"
+                f"d_forward = {metrics['forward_displacement_m']:.3f} m\n"
+                f"v_forward = {metrics['mean_forward_speed_m_s']:.3f} m/s\n"
+                f"lateral drift = {metrics['lateral_drift_m']:.3f} m",
+                transform=ax.transAxes,
+                va="top",
+                ha="left",
+                fontsize=9,
+                bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.88, edgecolor="#cccccc"),
+            )
         else:
             radius_text = "R=∞ m" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
             speed_text = f"v={metrics['mean_speed_m_s']:.3f} m/s"
@@ -392,7 +402,6 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
     cv2.imwrite(str(out_img), frame)
     out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return out_img, summary
-
 
 def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: Path):
     rows = []
