@@ -106,6 +106,7 @@ def parse_args():
     )
     parser.add_argument("--control-sign", type=float, default=RECTANGLE_CONTROL_SIGN, help="Use -1 when rectangle mode uses the unified eel.xml joint axes.")
     parser.add_argument("--print-hz", type=float, default=2.0)
+    parser.add_argument("--viewer-fps", type=float, default=60.0, help="Viewer render FPS used for real-time pacing.")
     parser.add_argument("--follow-camera", action="store_true")
     parser.add_argument("--print-contacts", action="store_true")
     parser.add_argument(
@@ -141,6 +142,11 @@ def main():
     wall_contact_count = 0
     wall_contact_examples: set[str] = set()
     steer_state = 0.0
+    distance = 0.0
+    steer = 0.0
+
+    safe_print("Rectangle course viewer", flush=True)
+    safe_print("  viewer pacing: real-time wall-clock pacing with batched MuJoCo steps", flush=True)
 
     def reset_to_start():
         nonlocal waypoint_index, laps, steer_state, last_path_s
@@ -159,65 +165,76 @@ def main():
             viewer.cam.elevation = -90
             viewer.cam.azimuth = 0
 
+        target_fps = max(args.viewer_fps, 1.0)
+        frame_dt = 1.0 / target_fps
+        last_wall_clock = time.perf_counter()
+
         while viewer.is_running():
-            base_pos = data.xpos[base_body_id].copy()
+            frame_start = time.perf_counter()
+            wall_dt = min(frame_start - last_wall_clock, 0.05)
+            last_wall_clock = frame_start
+            target_sim_time = data.time + wall_dt
+            base_pos = data.xpos[base_body_id]
 
-            if args.controller == "pure_pursuit":
-                path_s = path.closest_s(base_pos[:2])
-                if path_s + path.total_length * laps < last_path_s - 0.5 * path.total_length:
-                    laps += 1
-                last_path_s = path_s + path.total_length * laps
-                target = path.point_at(path_s + args.lookahead)
-                segment_index, _ = path.progress_info(path_s)
-                waypoint_index = segment_index
-                delta = target - base_pos[:2]
-                distance = float(np.linalg.norm(delta))
-            else:
-                waypoint = args.waypoints[waypoint_index]
-                delta = waypoint - base_pos[:2]
-                distance = float(np.linalg.norm(delta))
+            while data.time + 1e-12 < target_sim_time:
+                base_pos = data.xpos[base_body_id].copy()
 
-                if distance < args.reach_radius:
-                    waypoint_index = (waypoint_index + 1) % len(args.waypoints)
-                    if waypoint_index == 0:
+                if args.controller == "pure_pursuit":
+                    path_s = path.closest_s(base_pos[:2])
+                    if path_s + path.total_length * laps < last_path_s - 0.5 * path.total_length:
                         laps += 1
+                    last_path_s = path_s + path.total_length * laps
+                    target = path.point_at(path_s + args.lookahead)
+                    segment_index, _ = path.progress_info(path_s)
+                    waypoint_index = segment_index
+                    delta = target - base_pos[:2]
+                    distance = float(np.linalg.norm(delta))
+                else:
                     waypoint = args.waypoints[waypoint_index]
                     delta = waypoint - base_pos[:2]
                     distance = float(np.linalg.norm(delta))
 
-            desired_yaw = float(np.arctan2(delta[1], delta[0]))
-            yaw = float(data.qpos[2])
-            heading_error = float(wrap_pi(desired_yaw - yaw))
-            target_steer = float(np.clip(-args.steer_gain * heading_error, -args.max_bias, args.max_bias))
-            alpha = float(np.clip(args.steer_smoothing, 0.0, 1.0))
-            steer_state += alpha * (target_steer - steer_state)
-            steer = steer_state
-            joint_bias = steering_profile(steer)
-            target_amp_scales = turning_amp_scales(args.amp_scales, steer, args.turn_amp_gain)
-            mu_scales = amp_scales_to_mu_scales(target_amp_scales)
+                    if distance < args.reach_radius:
+                        waypoint_index = (waypoint_index + 1) % len(args.waypoints)
+                        if waypoint_index == 0:
+                            laps += 1
+                        waypoint = args.waypoints[waypoint_index]
+                        delta = waypoint - base_pos[:2]
+                        distance = float(np.linalg.norm(delta))
 
-            cpg_params = HopfCPGParams(
-                frequency=args.freq,
-                wavelength=args.wavelength,
-                ajoint=ajoint_rad,
-                mu_scales=mu_scales,
-                phase_lags=args.phase_lags,
-                joint_bias=joint_bias,
-            )
-            targets = cpg.step(data.time, model.opt.timestep, cpg_params)
-            data.ctrl[0:6] = args.control_sign * np.clip(targets, -1.2, 1.2)
-            mujoco.mj_step(model, data)
+                desired_yaw = float(np.arctan2(delta[1], delta[0]))
+                yaw = float(data.qpos[2])
+                heading_error = float(wrap_pi(desired_yaw - yaw))
+                target_steer = float(np.clip(-args.steer_gain * heading_error, -args.max_bias, args.max_bias))
+                alpha = float(np.clip(args.steer_smoothing, 0.0, 1.0))
+                steer_state += alpha * (target_steer - steer_state)
+                steer = steer_state
+                joint_bias = steering_profile(steer)
+                target_amp_scales = turning_amp_scales(args.amp_scales, steer, args.turn_amp_gain)
+                mu_scales = amp_scales_to_mu_scales(target_amp_scales)
 
-            if args.print_contacts and data.time >= args.contact_ignore_seconds:
-                for i in range(data.ncon):
-                    contact = data.contact[i]
-                    if contact.geom1 in wall_geom_ids or contact.geom2 in wall_geom_ids:
-                        g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or f"geom{contact.geom1}"
-                        g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or f"geom{contact.geom2}"
-                        wall_contact_count += 1
-                        wall_contact_examples.add(f"{g1}<->{g2}")
+                cpg_params = HopfCPGParams(
+                    frequency=args.freq,
+                    wavelength=args.wavelength,
+                    ajoint=ajoint_rad,
+                    mu_scales=mu_scales,
+                    phase_lags=args.phase_lags,
+                    joint_bias=joint_bias,
+                )
+                targets = cpg.step(data.time, model.opt.timestep, cpg_params)
+                data.ctrl[0:6] = args.control_sign * np.clip(targets, -1.2, 1.2)
+                mujoco.mj_step(model, data)
 
-            base_pos = data.xpos[base_body_id]
+                if args.print_contacts and data.time >= args.contact_ignore_seconds:
+                    for i in range(data.ncon):
+                        contact = data.contact[i]
+                        if contact.geom1 in wall_geom_ids or contact.geom2 in wall_geom_ids:
+                            g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or f"geom{contact.geom1}"
+                            g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or f"geom{contact.geom2}"
+                            wall_contact_count += 1
+                            wall_contact_examples.add(f"{g1}<->{g2}")
+
+                base_pos = data.xpos[base_body_id]
 
             now = time.time()
             if now - last_print >= print_period:
@@ -241,7 +258,11 @@ def main():
                     viewer.cam.lookat[0] = base_pos[0]
                     viewer.cam.lookat[1] = base_pos[1]
             viewer.sync()
-            time.sleep(model.opt.timestep)
+
+            elapsed = time.perf_counter() - frame_start
+            sleep_time = frame_dt - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
 
 if __name__ == "__main__":
