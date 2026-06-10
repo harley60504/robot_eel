@@ -2,8 +2,8 @@
   {
     "label": "real_turn_1",
     "kind": "turn",
-    "video": "C:\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141203.mp4",
-    "summary": "C:\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260608_141203\\tracked_center_summary_cleaned_physical.json",
+    "video": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141203.mp4",
+    "summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260608_141203\\tracked_center_summary_cleaned_physical.json",
     "point_count": 206,
     "duration_s": 15.8,
     "straight_distance_px": 76.98205399740901,
@@ -11,15 +11,15 @@
     "net_dx_px": 75.98686440677966,
     "net_dy_px": 12.338276836158192,
     "fit_kind": "circle",
-    "radius_px": 37.41199416532401,
-    "rmse_px": 0.8649491331939498,
-    "arc_deg": 170.6151118773161
+    "radius_px": 37.41199416532248,
+    "rmse_px": 0.8649491331939378,
+    "arc_deg": 170.61511187730548
   },
   {
     "label": "real_turn_2",
     "kind": "turn",
-    "video": "C:\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141254.mp4",
-    "summary": "C:\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260608_141254\\tracked_center_summary_cleaned_physical.json",
+    "video": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141254.mp4",
+    "summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260608_141254\\tracked_center_summary_cleaned_physical.json",
     "point_count": 198,
     "duration_s": 15.466666666666667,
     "straight_distance_px": 74.18737879800656,
@@ -27,15 +27,15 @@
     "net_dx_px": 73.12958900102365,
     "net_dy_px": 12.483204134366924,
     "fit_kind": "circle",
-    "radius_px": 38.98079635788208,
-    "rmse_px": 1.050531329960382,
-    "arc_deg": 150.19763701195726
+    "radius_px": 38.98079635788236,
+    "rmse_px": 1.0505313299604433,
+    "arc_deg": 150.19763701196757
   },
   {
     "label": "real_straight",
     "kind": "straight",
-    "video": "C:\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260607_234118.mp4",
-    "summary": "C:\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260607_234118\\tracked_center_summary_cleaned_physical.json",
+    "video": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260607_234118.mp4",
+    "summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260607_234118\\tracked_center_summary_cleaned_physical.json",
     "point_count": 0,
     "status": "no tracked points",
     "straight_distance_px": 0.0,

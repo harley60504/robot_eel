@@ -2,7 +2,7 @@
     <body name="base_link" pos="0.65 -0.35 -0.02">
       <joint name="root_x" type="slide" pos="0 0 0" axis="1 0 0" limited="false" armature="0.01" damping="0.1" />
       <joint name="root_y" type="slide" pos="0 0 0" axis="0 1 0" limited="false" armature="0.01" damping="0.1" />
-      <joint name="root_z_rot" type="hinge" pos="0 0 0" axis="0 0 1" limited="false" armature="0.01" damping="0.1" />
+      <joint name="root_z_rot" type="hinge" pos="0 0 0" axis="0 0 1" limited="false" armature="0.01" damping="0.001" />
       <inertial pos="0.062748 2.5587E-16 0.00026796" mass="0.500" fullinertia="1.347334E-04 3.051869E-04 2.977622E-04 -4.321919E-21 1.686283E-07 -9.374230E-23" />
       <geom name="base_link_collision" type="mesh" mesh="base_link_mesh" class="eel_collision_fluid" />
       <geom name="base_link_visual" type="mesh" mesh="base_link_mesh" contype="0" conaffinity="0" group="1" material="eel_mat" />
