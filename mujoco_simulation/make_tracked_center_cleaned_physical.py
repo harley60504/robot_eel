@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 
 from track_video_start_to_wall import ClipConfig, detect_points, draw_fit, fit_circle, fit_line
@@ -118,6 +119,44 @@ def add_metric_units(result: dict, fit: dict, fit_kind: str, wall_seconds: float
     return result
 
 
+def draw_text_outline(frame, text: str, org: tuple[int, int], scale: float = 0.8, color=(255, 255, 255)) -> None:
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (0, 0, 0), 5, cv2.LINE_AA)
+    cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
+
+
+def annotate_preview(preview_path: Path, result: dict) -> None:
+    if not preview_path.exists():
+        return
+    frame = cv2.imread(str(preview_path))
+    if frame is None:
+        return
+
+    if result.get("fit_kind") == "line":
+        speed = result.get("forward_speed_m_s")
+        speed_text = "nan" if speed is None else f"{speed:.3f} m/s"
+        lines = [
+            "Straight swim  REAL",
+            f"Real: {result.get('point_count', 0)} pts",
+            f"speed {speed_text}",
+            f"forward {result.get('forward_distance_m', 0.0):.3f} m",
+            f"line RMSE {result.get('rmse_px', 0.0):.1f}px",
+        ]
+    else:
+        lines = [
+            f"{result.get('clip_key', 'turn')}  REAL",
+            f"Real: {result.get('point_count', 0)} pts",
+            f"R {result.get('radius_m', 0.0):.3f} m ({result.get('radius_px', 0.0):.1f}px)",
+            f"arc {result.get('arc_deg', 0.0):.1f} deg",
+            f"RMSE {result.get('rmse_px', 0.0):.1f}px",
+        ]
+
+    x, y = 28, 48
+    for line in lines:
+        draw_text_outline(frame, line, (x, y), scale=0.78)
+        y += 32
+    cv2.imwrite(str(preview_path), frame)
+
+
 def process_video(
     video_path: Path,
     out_root: Path,
@@ -137,7 +176,7 @@ def process_video(
         draw_fit(video_path, clip.wall_seconds, points, curve, preview_path)
 
     result = {
-        "tracker_version": "legacy_start_to_wall_preview_v2",
+        "tracker_version": "legacy_start_to_wall_preview_v3",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
@@ -155,6 +194,8 @@ def process_video(
         "preview_image": str(preview_path) if write_preview and curve is not None else None,
     }
     result = add_metric_units(result, fit, clip.fit_kind, clip.wall_seconds, px_per_m)
+    if write_preview and curve is not None:
+        annotate_preview(preview_path, result)
 
     out_path = out_dir / output_name
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
