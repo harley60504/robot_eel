@@ -43,7 +43,7 @@ def parse_waypoints(value: str) -> np.ndarray:
 
 
 def steering_profile(value: float) -> tuple[float, ...]:
-    weights = np.array([0.45, 0.55, 0.68, 0.80, 0.92, 1.0], dtype=np.float64)
+    weights = np.array([0.42, 0.52, 0.64, 0.76, 0.88, 1.0], dtype=np.float64)
     return tuple(float(value * weight) for weight in weights)
 
 
@@ -51,14 +51,21 @@ def turning_amp_scales(base_scales: tuple[float, ...], steer: float, gain: float
     if gain <= 0.0:
         return base_scales
     base = np.asarray(base_scales, dtype=np.float64)
-    tail_weights = np.array([0.0, 0.0, 0.15, 0.35, 0.65, 1.0], dtype=np.float64)
+    tail_weights = np.array([0.0, 0.0, 0.12, 0.28, 0.52, 0.78], dtype=np.float64)
     multiplier = 1.0 + gain * abs(float(steer)) * tail_weights
-    return tuple(float(value) for value in np.clip(base * multiplier, 0.2, 1.6))
+    return tuple(float(value) for value in np.clip(base * multiplier, 0.2, 1.45))
 
 
 def amp_scales_to_mu_scales(amp_scales: tuple[float, ...]) -> tuple[float, ...]:
     values = np.asarray(amp_scales, dtype=np.float64)
     return tuple(float(value * value) for value in values)
+
+
+def soft_limit(value: float, limit: float) -> float:
+    limit = abs(float(limit))
+    if limit <= 1e-9:
+        return 0.0
+    return float(limit * np.tanh(float(value) / limit))
 
 
 def parse_args():
@@ -88,21 +95,27 @@ def parse_args():
     parser.add_argument("--path-half-y", type=float, default=RECTANGLE_PATH_HALF_Y)
     parser.add_argument("--path-center-x", type=float, default=RECTANGLE_PATH_CENTER_X)
     parser.add_argument("--path-center-y", type=float, default=RECTANGLE_PATH_CENTER_Y)
-    parser.add_argument("--lookahead", type=float, default=0.75)
+    parser.add_argument("--lookahead", type=float, default=0.95)
     parser.add_argument("--reach-radius", type=float, default=0.25)
-    parser.add_argument("--steer-gain", type=float, default=0.65)
-    parser.add_argument("--max-bias", type=float, default=0.38)
+    parser.add_argument("--steer-gain", type=float, default=0.50)
+    parser.add_argument("--max-bias", type=float, default=0.30)
     parser.add_argument(
         "--turn-amp-gain",
         type=float,
-        default=1.0,
+        default=0.60,
         help="Increase CPG amplitude target as |steer| grows. 0 disables turning amplitude modulation.",
     )
     parser.add_argument(
-        "--steer-smoothing",
+        "--steer-time-constant",
         type=float,
-        default=0.14,
-        help="Low-pass factor for steering. 1.0 disables smoothing; smaller is smoother.",
+        default=0.18,
+        help="Seconds for steering low-pass response. Larger values make maximum turns smoother.",
+    )
+    parser.add_argument(
+        "--steer-rate-limit",
+        type=float,
+        default=1.6,
+        help="Maximum steering-bias change per second. Prevents jerky saturation at maximum turn.",
     )
     parser.add_argument("--control-sign", type=float, default=RECTANGLE_CONTROL_SIGN, help="Use -1 when rectangle mode uses the unified eel.xml joint axes.")
     parser.add_argument("--print-hz", type=float, default=2.0)
@@ -147,6 +160,10 @@ def main():
 
     safe_print("Rectangle course viewer", flush=True)
     safe_print("  viewer pacing: real-time wall-clock pacing with batched MuJoCo steps", flush=True)
+    safe_print(
+        "  turn smoothing: soft steering limit, low-pass, and rate limit enabled",
+        flush=True,
+    )
 
     def reset_to_start():
         nonlocal waypoint_index, laps, steer_state, last_path_s
@@ -205,10 +222,19 @@ def main():
                 desired_yaw = float(np.arctan2(delta[1], delta[0]))
                 yaw = float(data.qpos[2])
                 heading_error = float(wrap_pi(desired_yaw - yaw))
-                target_steer = float(np.clip(-args.steer_gain * heading_error, -args.max_bias, args.max_bias))
-                alpha = float(np.clip(args.steer_smoothing, 0.0, 1.0))
-                steer_state += alpha * (target_steer - steer_state)
+                raw_steer = -args.steer_gain * heading_error
+                target_steer = soft_limit(raw_steer, args.max_bias)
+
+                dt = float(model.opt.timestep)
+                tau = max(float(args.steer_time_constant), dt)
+                alpha = 1.0 - float(np.exp(-dt / tau))
+                filtered_steer = steer_state + alpha * (target_steer - steer_state)
+                max_delta = max(float(args.steer_rate_limit), 0.0) * dt
+                if max_delta > 0.0:
+                    filtered_steer = steer_state + float(np.clip(filtered_steer - steer_state, -max_delta, max_delta))
+                steer_state = filtered_steer
                 steer = steer_state
+
                 joint_bias = steering_profile(steer)
                 target_amp_scales = turning_amp_scales(args.amp_scales, steer, args.turn_amp_gain)
                 mu_scales = amp_scales_to_mu_scales(target_amp_scales)
