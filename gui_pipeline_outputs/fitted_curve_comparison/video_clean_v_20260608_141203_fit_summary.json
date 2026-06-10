@@ -1,0 +1,19 @@
+{
+  "label": "real_turn_1",
+  "kind": "turn",
+  "video": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260608_141203.mp4",
+  "summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\real_video_analysis\\clean_v_20260608_141203\\tracked_center_summary_cleaned_physical.json",
+  "point_count": 41,
+  "duration_s": 8.0,
+  "straight_distance_px": 340.88828812391256,
+  "path_distance_px": 1118.8805102743406,
+  "net_dx_px": -280.5437063396762,
+  "net_dy_px": -193.6493062555328,
+  "fit_kind": "circle",
+  "radius_px": 259.0920838153421,
+  "radius_m": 0.44415785796915785,
+  "rmse_px": 21.793848620030356,
+  "rmse_m": 0.03736088334862347,
+  "arc_deg": 73.83021407605843,
+  "speed_m_s": 0.23976010934450154
+}

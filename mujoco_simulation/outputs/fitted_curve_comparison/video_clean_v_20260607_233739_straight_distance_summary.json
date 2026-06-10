@@ -1,0 +1,17 @@
+{
+  "label": "real_straight",
+  "kind": "straight",
+  "video": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260607_233739.mp4",
+  "summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\video_analysis\\clean_v_20260607_233739\\tracked_center_summary_cleaned_physical.json",
+  "point_count": 42,
+  "duration_s": 13.0,
+  "straight_distance_px": 1266.2294426942995,
+  "path_distance_px": 1400.777075431816,
+  "net_dx_px": 41.96914494470775,
+  "net_dy_px": 1265.5337184044233,
+  "fit_kind": "line",
+  "radius_m": null,
+  "forward_distance_m": 2.1693771852523738,
+  "forward_speed_m_s": 0.14462514568349158,
+  "rmse_px": 10.203944487428288
+}
