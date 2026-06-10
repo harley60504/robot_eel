@@ -19,9 +19,9 @@ DEFAULT_START_Y = 0.0
 # Keep the rectangle path away from the top/bottom walls. The eel body swings in y
 # during turns, so using +/-0.35 m as the centerline can make the tail/body touch
 # the y walls even when the base_link follows the route correctly.
-RECTANGLE_WAYPOINTS = "2.60,-0.25;2.60,0.25;0.40,0.25;0.40,-0.25"
+RECTANGLE_WAYPOINTS = "2.60,-0.35;2.60,0.25;0.40,0.25;0.40,-0.35"
 RECTANGLE_PATH_HALF_X = 1.10
-RECTANGLE_PATH_HALF_Y = 0.25
+RECTANGLE_PATH_HALF_Y = 0.35
 RECTANGLE_PATH_CENTER_X = 1.50
 RECTANGLE_PATH_CENTER_Y = 0.0
 
