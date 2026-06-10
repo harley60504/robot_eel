@@ -18,6 +18,7 @@ DEFAULT_RECORDINGS_DIR = Path("../Release/python_backend/recordings")
 DEFAULT_OUT_ROOT = Path("outputs/video_analysis")
 DEFAULT_OUTPUT_NAME = "tracked_center_summary_cleaned_physical.json"
 DEFAULT_PREVIEW_NAME = "tracked_center_overlay_cleaned_physical.png"
+DEFAULT_PX_PER_M = 875.0 / 1.5
 
 
 def parse_args():
@@ -27,6 +28,7 @@ def parse_args():
     parser.add_argument("--out-root", type=Path, default=DEFAULT_OUT_ROOT)
     parser.add_argument("--output-name", default=DEFAULT_OUTPUT_NAME)
     parser.add_argument("--preview-name", default=DEFAULT_PREVIEW_NAME)
+    parser.add_argument("--px-per-m", type=float, default=DEFAULT_PX_PER_M)
     parser.add_argument("--no-preview", action="store_true")
     return parser.parse_args()
 
@@ -92,7 +94,38 @@ def fit_points(points, fit_kind: str):
     return fit_line(xy)
 
 
-def process_video(video_path: Path, out_root: Path, output_name: str, preview_name: str, write_preview: bool):
+def add_metric_units(result: dict, fit: dict, fit_kind: str, wall_seconds: float, px_per_m: float) -> dict:
+    result["px_per_m"] = float(px_per_m)
+    result["path_distance_m"] = result["path_distance_px"] / px_per_m
+    result["straight_distance_m"] = result["straight_distance_px"] / px_per_m
+
+    if fit_kind == "circle" and fit.get("radius_px") is not None:
+        result["radius_m"] = fit["radius_px"] / px_per_m
+        result["rmse_m"] = fit["rmse_px"] / px_per_m
+        return result
+
+    if fit_kind == "line" and "line_start_px" in fit and "line_end_px" in fit:
+        line_start_y = float(fit["line_start_px"][1])
+        line_end_y = float(fit["line_end_px"][1])
+        forward_px = abs(line_end_y - line_start_y)
+        forward_m = forward_px / px_per_m
+        result["forward_distance_px"] = forward_px
+        result["forward_distance_m"] = forward_m
+        result["forward_speed_m_s"] = None if wall_seconds <= 1e-9 else forward_m / wall_seconds
+        result["forward_speed_source"] = "abs(fitted_line_end_y - fitted_line_start_y) / px_per_m / wall_seconds"
+        result["line_length_m"] = fit["length_px"] / px_per_m
+        result["rmse_m"] = fit["rmse_px"] / px_per_m
+    return result
+
+
+def process_video(
+    video_path: Path,
+    out_root: Path,
+    output_name: str = DEFAULT_OUTPUT_NAME,
+    preview_name: str = DEFAULT_PREVIEW_NAME,
+    write_preview: bool = True,
+    px_per_m: float = DEFAULT_PX_PER_M,
+):
     clip = make_clip(video_path)
     out_dir = out_root / video_path.stem
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -104,7 +137,7 @@ def process_video(video_path: Path, out_root: Path, output_name: str, preview_na
         draw_fit(video_path, clip.wall_seconds, points, curve, preview_path)
 
     result = {
-        "tracker_version": "legacy_start_to_wall_preview_v1",
+        "tracker_version": "legacy_start_to_wall_preview_v2",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
@@ -121,6 +154,7 @@ def process_video(video_path: Path, out_root: Path, output_name: str, preview_na
         **fit,
         "preview_image": str(preview_path) if write_preview and curve is not None else None,
     }
+    result = add_metric_units(result, fit, clip.fit_kind, clip.wall_seconds, px_per_m)
 
     out_path = out_dir / output_name
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
@@ -130,7 +164,13 @@ def process_video(video_path: Path, out_root: Path, output_name: str, preview_na
         rmse = "nan" if result["rmse_px"] is None else f"{result['rmse_px']:.3f}"
         print(f"points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
     else:
-        print(f"points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} rmse_px={result.get('rmse_px', 0.0):.3f} preview={result['preview_image']}")
+        speed = result.get("forward_speed_m_s")
+        speed_text = "nan" if speed is None else f"{speed:.4f}m/s"
+        print(
+            f"points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} "
+            f"forward_px={result.get('forward_distance_px', 0.0):.3f} "
+            f"speed={speed_text} rmse_px={result.get('rmse_px', 0.0):.3f} preview={result['preview_image']}"
+        )
     return out_path
 
 
@@ -146,7 +186,16 @@ def main():
         if not video_path.exists():
             print(f"skip missing video: {video_path}")
             continue
-        generated.append(process_video(video_path, out_root, args.output_name, args.preview_name, not args.no_preview))
+        generated.append(
+            process_video(
+                video_path,
+                out_root,
+                args.output_name,
+                args.preview_name,
+                not args.no_preview,
+                args.px_per_m,
+            )
+        )
     print(f"\ngenerated {len(generated)} tracking json file(s)")
 
 
