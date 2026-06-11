@@ -21,13 +21,16 @@ MIN_FINAL_POINTS = 6
 MIN_FINAL_NET_PX = 45.0
 MIN_FINAL_PATH_PX = 55.0
 MIN_TURN_NET_PX = 60.0
-MIN_TURN_ARC_DEG = 30.0
-MIN_TURN_HEADING_DEG = 25.0
+MIN_TURN_ARC_DEG = 35.0
+MIN_TURN_HEADING_DEG = 28.0
 MIN_TURN_LATERAL_SPAN_PX = 80.0
 MIN_TURN_LATERAL_DISP_PX = 70.0
-MAX_TURN_STRAIGHTNESS = 0.96
+MAX_TURN_STRAIGHTNESS = 0.93
 MAX_TURN_RMSE_OVER_RADIUS = 0.75
 MIN_TURN_SCORE = 2
+STRAIGHT_FORWARD_DOMINANCE_RATIO = 1.8
+MAX_STRAIGHT_HEADING_DEG = 45.0
+MAX_STRAIGHT_LATERAL_DISP_PX = 85.0
 
 
 def parse_args():
@@ -165,29 +168,46 @@ def classify_real_points(points: np.ndarray, source_summary: dict) -> dict:
     straightness = net_px / max(path_px, 1e-9)
     lateral_span = float(np.ptp(xy[:, 0]))
     lateral_disp = float(abs(xy[-1, 0] - xy[0, 0]))
+    forward_disp = float(abs(xy[-1, 1] - xy[0, 1]))
     heading_deg = heading_change_deg(xy)
     rmse_over_r = None if not radius_px or radius_px <= 1e-9 else circle_rmse / radius_px
+
+    forward_dominant = forward_disp >= STRAIGHT_FORWARD_DOMINANCE_RATIO * max(lateral_disp, 1.0)
+    body_wiggle_not_turn = lateral_span >= MIN_TURN_LATERAL_SPAN_PX and lateral_disp <= 0.55 * lateral_span
+    straight_override = (
+        forward_dominant
+        and lateral_disp <= MAX_STRAIGHT_LATERAL_DISP_PX
+        and heading_deg <= MAX_STRAIGHT_HEADING_DEG
+    )
 
     evidence = []
     if arc_deg >= MIN_TURN_ARC_DEG:
         evidence.append("arc")
     if heading_deg >= MIN_TURN_HEADING_DEG:
         evidence.append("heading")
-    if lateral_span >= MIN_TURN_LATERAL_SPAN_PX:
-        evidence.append("lateral_span")
     if lateral_disp >= MIN_TURN_LATERAL_DISP_PX:
         evidence.append("lateral_disp")
+    if lateral_span >= MIN_TURN_LATERAL_SPAN_PX and lateral_disp >= 45.0:
+        evidence.append("lateral_span_with_drift")
     if rmse_over_r is not None and rmse_over_r <= MAX_TURN_RMSE_OVER_RADIUS:
         evidence.append("circle_fit")
-    if straightness <= MAX_TURN_STRAIGHTNESS and lateral_span >= 55.0:
+    if straightness <= MAX_TURN_STRAIGHTNESS and (heading_deg >= 18.0 or lateral_disp >= 45.0):
         evidence.append("not_straight")
 
-    strong_lateral_turn = lateral_span >= 110.0 or lateral_disp >= 95.0
-    is_turn = net_px >= MIN_TURN_NET_PX and radius_px is not None and (strong_lateral_turn or len(evidence) >= MIN_TURN_SCORE)
+    strong_lateral_turn = lateral_disp >= 95.0
+    has_directional_turn = heading_deg >= MIN_TURN_HEADING_DEG or lateral_disp >= MIN_TURN_LATERAL_DISP_PX or arc_deg >= 55.0
+    is_turn = (
+        not straight_override
+        and net_px >= MIN_TURN_NET_PX
+        and radius_px is not None
+        and has_directional_turn
+        and (strong_lateral_turn or len(evidence) >= MIN_TURN_SCORE)
+    )
 
     common = {
         "final_path_px": path_px,
         "final_net_px": net_px,
+        "final_forward_displacement_px": forward_disp,
         "final_straightness": straightness,
         "final_line_rmse_px": line_rmse,
         "final_circle_rmse_px": circle_rmse,
@@ -196,6 +216,9 @@ def classify_real_points(points: np.ndarray, source_summary: dict) -> dict:
         "final_heading_change_deg": heading_deg,
         "final_lateral_span_px": lateral_span,
         "final_lateral_displacement_px": lateral_disp,
+        "final_forward_dominant": bool(forward_dominant),
+        "final_body_wiggle_not_turn": bool(body_wiggle_not_turn),
+        "final_straight_override": bool(straight_override),
         "final_turn_evidence": evidence,
         "final_turn_evidence_score": len(evidence),
     }
@@ -209,11 +232,12 @@ def classify_real_points(points: np.ndarray, source_summary: dict) -> dict:
             "curve": circle_curve,
             "fit": circle_fit,
         }
+    reason = "straight override: forward displacement dominates body wiggle" if straight_override else f"not enough turn evidence={','.join(evidence)}"
     return {
         **common,
         "final_motion_class": "straight",
         "final_fit_kind": "line",
-        "final_reason": f"not enough turn evidence={','.join(evidence)}",
+        "final_reason": reason,
         "curve": line_curve,
         "fit": line_fit,
     }
@@ -534,11 +558,10 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
     rows = []
     configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
     if not configs:
-        for config in REAL_VIDEO_CONFIGS:
-            stem = config["stem"]
+        for stem in ("clean_v_20260608_141203", "clean_v_20260608_141254", "clean_v_20260607_233739"):
             configs.append({
                 "stem": stem,
-                "label": config["label"],
+                "label": stem,
                 "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json",
                 "video_path": recordings_dir / f"{stem}.mp4",
             })
@@ -561,7 +584,7 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
             print(f"{label}: FINAL turn radius={radius} speed={speed} evidence={summary.get('final_turn_evidence')}")
         elif cls == "straight":
             speed = "nan" if summary.get("forward_speed_m_s") is None else f"{summary['forward_speed_m_s']:.3f}m/s"
-            print(f"{label}: FINAL straight speed={speed} forward={summary.get('forward_distance_m', 0.0):.3f}m")
+            print(f"{label}: FINAL straight speed={speed} forward={summary.get('forward_distance_m', 0.0):.3f}m reason={summary.get('final_reason')}")
         else:
             print(f"{label}: FINAL invalid reason={summary.get('final_reason')}")
     (out_dir / "real_video_summary.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
