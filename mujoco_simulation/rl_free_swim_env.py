@@ -30,8 +30,11 @@ class FreeSwimConfig:
     normalized_actions: bool = True
     amp_scale_lows: tuple[float, ...] = (1.10, 0.95, 0.90, 0.95, 1.00, 1.05)
     amp_scale_highs: tuple[float, ...] = (1.35, 1.20, 1.10, 1.20, 1.30, 1.40)
-    phase_lag_lows: tuple[float, ...] = (0.57, 0.57, 0.57, 0.57, 0.57)
-    phase_lag_highs: tuple[float, ...] = (0.66, 0.66, 0.66, 0.66, 0.66)
+    # PPO now learns one shared phase-lag residual for straight swimming instead of
+    # five independent phase lags.  The learned scalar is copied to all 5 links.
+    # This keeps the traveling wave coherent while still allowing small fine-tuning.
+    shared_phase_lag_low: float = 0.594439
+    shared_phase_lag_high: float = 0.634439
     reward_average_seconds: float = 0.5
     lateral_velocity_weight: float = 0.2
     lateral_position_weight: float = 0.05
@@ -45,6 +48,18 @@ class FreeSwimConfig:
 
 
 class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
+    """Free-swim PPO environment.
+
+    Action layout:
+        0:6  amp_scales
+        6    shared phase_lag copied to all 5 inter-joint phase gaps
+
+    The shared phase-lag action is intentionally low-dimensional.  Independent
+    per-link phase lags can easily destroy the coherent CPG traveling wave, so
+    straight swimming now treats phase as a single small residual around the
+    hand-tuned phase-lag value.
+    """
+
     metadata = {"render_modes": []}
 
     def __init__(self, config: FreeSwimConfig | None = None):
@@ -70,7 +85,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         self.max_steps = max(1, int(round(self.cfg.episode_seconds / self.cfg.control_dt)))
         self.warmup_steps = max(0, int(round(self.cfg.warmup_seconds / self.cfg.control_dt)))
         self.step_count = 0
-        self.action_dim = 11
+        self.action_dim = 7
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
         self.cpg = HopfCPG(num_joints=6)
         self.velocity_window = deque(
@@ -105,7 +120,8 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         action = np.clip(action, self.action_space.low, self.action_space.high)
         physical_action = self._physical_action(action)
         amp_scales = tuple(float(value) for value in physical_action[:6])
-        phase_lags = tuple(float(value) for value in physical_action[6:])
+        shared_phase_lag = float(physical_action[6])
+        phase_lags = (shared_phase_lag,) * 5
 
         params = HopfCPGParams(
             frequency=self.cfg.fixed_frequency,
@@ -172,6 +188,9 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
             "action_delta": action_delta,
             "steady_state": steady_state,
             "physical_action": physical_action.astype(np.float32),
+            "amp_scales": np.asarray(amp_scales, dtype=np.float32),
+            "shared_phase_lag": shared_phase_lag,
+            "phase_lags": np.asarray(phase_lags, dtype=np.float32),
             "reward_forward": reward_forward,
             "reward_lateral_velocity": reward_lateral_velocity,
             "reward_lateral_position": reward_lateral_position,
@@ -185,12 +204,12 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
     def _action_bounds(self) -> tuple[np.ndarray, np.ndarray]:
         amp_lows = np.asarray(self.cfg.amp_scale_lows, dtype=np.float64)
         amp_highs = np.asarray(self.cfg.amp_scale_highs, dtype=np.float64)
-        phase_lows = np.asarray(self.cfg.phase_lag_lows, dtype=np.float64)
-        phase_highs = np.asarray(self.cfg.phase_lag_highs, dtype=np.float64)
         if amp_lows.size != 6 or amp_highs.size != 6:
             raise ValueError("amp bounds must have 6 values")
-        if phase_lows.size != 5 or phase_highs.size != 5:
-            raise ValueError("phase bounds must have 5 values")
+        if self.cfg.shared_phase_lag_low > self.cfg.shared_phase_lag_high:
+            raise ValueError("shared_phase_lag_low cannot be greater than shared_phase_lag_high")
+        phase_lows = np.asarray([self.cfg.shared_phase_lag_low], dtype=np.float64)
+        phase_highs = np.asarray([self.cfg.shared_phase_lag_high], dtype=np.float64)
         return np.concatenate((amp_lows, phase_lows)), np.concatenate((amp_highs, phase_highs))
 
     def _physical_action(self, action: np.ndarray) -> np.ndarray:
@@ -241,5 +260,6 @@ if __name__ == "__main__":
             break
     print("free-swim smoke test OK")
     print("obs shape:", obs.shape)
+    print("action shape:", env.action_space.shape)
     print("last info:", info)
     print("total reward:", round(total_reward, 3))
