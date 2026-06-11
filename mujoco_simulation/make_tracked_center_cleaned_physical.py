@@ -21,11 +21,13 @@ DEFAULT_OUTPUT_NAME = "tracked_center_summary_cleaned_physical.json"
 DEFAULT_PREVIEW_NAME = "tracked_center_overlay_cleaned_physical.png"
 DEFAULT_PX_PER_M = 875.0 / 1.5
 
-MIN_AUTO_LINE_NET_PX = 120.0
-MIN_AUTO_LINE_STRAIGHTNESS = 0.70
-MAX_AUTO_LINE_RMSE_RATIO = 0.22
-MAX_AUTO_CIRCLE_RMSE_RADIUS_RATIO = 0.32
-MIN_TURN_ARC_DEG = 35.0
+PROBE_SECONDS = 8.0
+LINE_MEASURE_SECONDS = 13.0
+MIN_TURN_NET_PX = 120.0
+MIN_TURN_ARC_DEG = 60.0
+MAX_TURN_STRAIGHTNESS = 0.78
+MAX_TURN_CIRCLE_RMSE_OVER_RADIUS = 0.25
+MAX_TURN_CIRCLE_LINE_RMSE_RATIO = 0.90
 
 
 def parse_args():
@@ -61,22 +63,30 @@ def resolve_video(video: str, recordings_dir: Path) -> Path:
     return (recordings_dir / path).resolve()
 
 
+def make_probe_clip(video_path: Path) -> ClipConfig:
+    return ClipConfig(
+        f"{video_path.stem}_probe_8s",
+        video_path,
+        PROBE_SECONDS,
+        "auto",
+        roi=(80, 620, 940, 1240),
+        min_y=1000.0,
+    )
+
+
+def make_line_clip(video_path: Path) -> ClipConfig:
+    return ClipConfig(
+        f"{video_path.stem}_line_13s",
+        video_path,
+        LINE_MEASURE_SECONDS,
+        "line",
+        roi=(80, 0, 940, 1850),
+        min_y=80.0,
+    )
+
+
 def make_clip(video_path: Path) -> ClipConfig:
-    stem = video_path.stem.lower()
-    if "233739" in stem or "straight" in stem:
-        return ClipConfig(
-            "straight_233739",
-            video_path,
-            15.0,
-            "line",
-            roi=(80, 0, 940, 1850),
-            min_y=80.0,
-        )
-    if "141254" in stem or "spin" in stem:
-        key = "spin_left_141254"
-    else:
-        key = "turn_left_141203"
-    return ClipConfig(key, video_path, 8.0, "auto", roi=(80, 620, 940, 1240), min_y=1000.0)
+    return make_probe_clip(video_path)
 
 
 def path_distance(points) -> float:
@@ -114,24 +124,22 @@ def choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit):
         "auto_fit_circle_arc_deg": arc_deg,
     }
 
-    line_is_good = (
-        net_px >= MIN_AUTO_LINE_NET_PX
-        and straightness >= MIN_AUTO_LINE_STRAIGHTNESS
-        and line_rmse <= MAX_AUTO_LINE_RMSE_RATIO * max(net_px, 1.0)
-    )
-    circle_is_bad = (
-        arc_deg < MIN_TURN_ARC_DEG
-        or radius_px is None
-        or (circle_rmse_over_r is not None and circle_rmse_over_r > MAX_AUTO_CIRCLE_RMSE_RADIUS_RATIO)
-        or line_rmse < 0.65 * circle_rmse
+    circle_is_clear_turn = (
+        net_px >= MIN_TURN_NET_PX
+        and radius_px is not None
+        and arc_deg >= MIN_TURN_ARC_DEG
+        and straightness <= MAX_TURN_STRAIGHTNESS
+        and circle_rmse_over_r is not None
+        and circle_rmse_over_r <= MAX_TURN_CIRCLE_RMSE_OVER_RADIUS
+        and circle_rmse <= MAX_TURN_CIRCLE_LINE_RMSE_RATIO * max(line_rmse, 1.0)
     )
 
-    if line_is_good and circle_is_bad:
-        line_fit = {**line_fit, **auto, "auto_fit_kind": "line", "auto_fit_reason": "trajectory is straighter than circle fit"}
-        return line_curve, line_fit, "line"
+    if circle_is_clear_turn:
+        circle_fit = {**circle_fit, **auto, "auto_fit_kind": "circle", "auto_fit_reason": "8s probe found a clear circular turn"}
+        return circle_curve, circle_fit, "circle"
 
-    circle_fit = {**circle_fit, **auto, "auto_fit_kind": "circle", "auto_fit_reason": "arc/radius fit is stronger than line fit"}
-    return circle_curve, circle_fit, "circle"
+    line_fit = {**line_fit, **auto, "auto_fit_kind": "line", "auto_fit_reason": "8s probe did not show a clear turn; remeasure as straight for 13s"}
+    return line_curve, line_fit, "line"
 
 
 def fit_points(points, requested_fit_kind: str):
@@ -220,25 +228,49 @@ def process_video(
     write_preview: bool = True,
     px_per_m: float = DEFAULT_PX_PER_M,
 ):
-    clip = make_clip(video_path)
     out_dir = out_root / video_path.stem
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    points = detect_points(clip, Path.cwd())
-    curve, fit, selected_fit_kind = fit_points(points, clip.fit_kind)
+    probe_clip = make_probe_clip(video_path)
+    probe_points = detect_points(probe_clip, Path.cwd())
+    probe_curve, probe_fit, probe_fit_kind = fit_points(probe_points, probe_clip.fit_kind)
+
+    clip = probe_clip
+    points = probe_points
+    curve = probe_curve
+    fit = probe_fit
+    selected_fit_kind = probe_fit_kind
+    measurement_mode = "turn_8s_probe"
+
+    if probe_fit_kind == "line":
+        clip = make_line_clip(video_path)
+        points = detect_points(clip, Path.cwd())
+        curve, fit, selected_fit_kind = fit_points(points, "line")
+        measurement_mode = "line_13s_after_no_turn"
+
     preview_path = out_dir / preview_name
     if write_preview and curve is not None:
         draw_fit(video_path, clip.wall_seconds, points, curve, preview_path)
 
     result = {
-        "tracker_version": "legacy_start_to_wall_preview_v4_auto_fit",
+        "tracker_version": "legacy_start_to_wall_preview_v5_probe8_line13",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
         "clip_key": clip.key,
-        "requested_fit_kind": clip.fit_kind,
+        "requested_fit_kind": "auto_probe_then_measure",
         "fit_kind": selected_fit_kind,
+        "measurement_mode": measurement_mode,
         "wall_seconds": clip.wall_seconds,
+        "probe_wall_seconds": probe_clip.wall_seconds,
+        "probe_point_count": len(probe_points),
+        "probe_fit_kind": probe_fit_kind,
+        "probe_auto_fit_reason": probe_fit.get("auto_fit_reason"),
+        "probe_auto_fit_straightness": probe_fit.get("auto_fit_straightness"),
+        "probe_auto_fit_line_rmse_px": probe_fit.get("auto_fit_line_rmse_px"),
+        "probe_auto_fit_circle_rmse_px": probe_fit.get("auto_fit_circle_rmse_px"),
+        "probe_auto_fit_circle_rmse_over_radius": probe_fit.get("auto_fit_circle_rmse_over_radius"),
+        "probe_auto_fit_circle_arc_deg": probe_fit.get("auto_fit_circle_arc_deg"),
         "roi": list(clip.roi),
         "min_y": clip.min_y,
         "points": [list(p) for p in points],
@@ -259,12 +291,12 @@ def process_video(
     if selected_fit_kind == "circle":
         radius = "nan" if result["radius_px"] is None else f"{result['radius_px']:.3f}"
         rmse = "nan" if result["rmse_px"] is None else f"{result['rmse_px']:.3f}"
-        print(f"fit=circle points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
+        print(f"fit=circle mode={measurement_mode} points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
     else:
         speed = result.get("forward_speed_m_s")
         speed_text = "nan" if speed is None else f"{speed:.4f}m/s"
         print(
-            f"fit=line points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} "
+            f"fit=line mode={measurement_mode} points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} "
             f"forward_px={result.get('forward_distance_px', 0.0):.3f} "
             f"speed={speed_text} rmse_px={result.get('rmse_px', 0.0):.3f} preview={result['preview_image']}"
         )
