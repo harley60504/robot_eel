@@ -38,7 +38,7 @@ PX_PER_M = 875.0 / 1.5
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Plot fitted sim curves and import all three real videos.")
+    parser = argparse.ArgumentParser(description="Plot fitted sim curves and import selected real videos.")
     parser.add_argument("--sim-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_3x1_5"))
     parser.add_argument("--video-analysis-dir", type=Path, default=Path("outputs/video_analysis"))
     parser.add_argument("--recordings-dir", type=Path, default=Path("../Release/python_backend/recordings"))
@@ -149,16 +149,15 @@ def draw_rotated_tank(ax):
 
 
 def sim_metric_text(name: str, fit: dict, metrics: dict) -> str:
-    if name == "straight":
+    if fit["radius"] is None or name == "straight":
         return (
             "R = ∞ m\n"
             f"d_forward = {metrics['forward_displacement_m']:.3f} m\n"
             f"v_forward = {metrics['mean_forward_speed_m_s']:.3f} m/s\n"
             f"lateral drift = {metrics['lateral_drift_m']:.3f} m"
         )
-    radius_text = "∞ m" if fit["radius"] is None else f"{fit['radius']:.3f} m"
     return (
-        f"R = {radius_text}\n"
+        f"R = {fit['radius']:.3f} m\n"
         f"v = {metrics['mean_speed_m_s']:.3f} m/s\n"
         f"arc = {fit['arc_deg']:.1f} deg\n"
         f"RMSE = {fit['rmse']:.3f}"
@@ -178,15 +177,30 @@ def add_sim_metric_box(ax, text: str) -> None:
     )
 
 
+def sim_trajectory_files(sim_dir: Path) -> list[Path]:
+    files = sorted(sim_dir.glob("*_trajectory.csv"))
+    fixed_order = {name: idx for idx, name in enumerate(GAITS)}
+    return sorted(files, key=lambda p: fixed_order.get(p.name.removesuffix("_trajectory.csv"), 9999))
+
+
 def plot_sim_curves(sim_dir: Path, out_dir: Path):
     rows = []
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    files = sim_trajectory_files(sim_dir)
+    if not files:
+        print(f"skip sim curves: no *_trajectory.csv in {sim_dir}")
+        return rows
 
     fig, ax = plt.subplots(figsize=(5.2, 8.2), dpi=170)
     draw_rotated_tank(ax)
 
-    for idx, name in enumerate(GAITS):
-        arr = np.loadtxt(sim_dir / f"{name}_trajectory.csv", delimiter=",", skiprows=1)
+    for idx, csv_path in enumerate(files):
+        name = csv_path.name.removesuffix("_trajectory.csv")
+        arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[0] < 2:
+            continue
         xy = rotate_sim_xy(arr[:, 1:3])
         curve, fit = fitted_curve(xy)
         metrics = trajectory_metrics(arr, xy)
@@ -197,14 +211,24 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=44, marker="x", color=color, linewidth=2.0, zorder=4)
         rows.append({"name": name, **fit, **metrics})
 
+    if not rows:
+        print(f"skip sim curves: trajectory files in {sim_dir} had too few points")
+        plt.close(fig)
+        return rows
+
     ax.set_title("MuJoCo fitted curves, rotated to camera view")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out_dir / "sim_fitted_curves_rotated.png")
     plt.close(fig)
 
-    for idx, name in enumerate(GAITS):
-        arr = np.loadtxt(sim_dir / f"{name}_trajectory.csv", delimiter=",", skiprows=1)
+    for idx, csv_path in enumerate(files):
+        name = csv_path.name.removesuffix("_trajectory.csv")
+        arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[0] < 2:
+            continue
         xy = rotate_sim_xy(arr[:, 1:3])
         curve, fit = fitted_curve(xy)
         metrics = trajectory_metrics(arr, xy)
@@ -447,15 +471,47 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
     return out_img, summary
 
 
+def dynamic_real_configs(video_analysis_dir: Path, recordings_dir: Path):
+    summaries = sorted(video_analysis_dir.glob("*/tracked_center_summary_cleaned_physical.json"))
+    configs = []
+    for summary_path in summaries:
+        data = safe_read_summary(summary_path)
+        stem = data.get("video_stem") or summary_path.parent.name
+        video_value = data.get("video")
+        video_path = Path(video_value) if video_value else recordings_dir / f"{stem}.mp4"
+        if not video_path.exists():
+            fallback = recordings_dir / f"{stem}.mp4"
+            video_path = fallback if fallback.exists() else video_path
+        motion_class = str(data.get("motion_class") or data.get("fit_kind") or "").lower()
+        kind = "straight" if motion_class in {"line", "straight"} else "turn"
+        configs.append({"stem": stem, "label": stem, "kind": kind, "summary_path": summary_path, "video_path": video_path})
+    return configs
+
+
 def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: Path):
     rows = []
+    dynamic_configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
+    if dynamic_configs:
+        configs = dynamic_configs
+    else:
+        configs = []
+        for config in REAL_VIDEO_CONFIGS:
+            stem = config["stem"]
+            configs.append(
+                {
+                    "stem": stem,
+                    "label": config["label"],
+                    "kind": config["kind"],
+                    "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json",
+                    "video_path": recordings_dir / f"{stem}.mp4",
+                }
+            )
 
-    for config in REAL_VIDEO_CONFIGS:
-        stem = config["stem"]
+    for config in configs:
         label = config["label"]
         kind = config["kind"]
-        summary_path = video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json"
-        video_path = recordings_dir / f"{stem}.mp4"
+        summary_path = config["summary_path"]
+        video_path = config["video_path"]
 
         if not summary_path.exists() or not video_path.exists():
             print(f"skip real {label}: missing summary or video")
@@ -506,11 +562,12 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     sim_rows = plot_sim_curves(sim_dir, out_dir)
-    print(out_dir / "sim_fitted_curves_rotated.png")
+    if sim_rows:
+        print(out_dir / "sim_fitted_curves_rotated.png")
 
     for row in sim_rows:
         radius = "R=∞m" if row["radius"] is None else f"R={row['radius']:.3f}m"
-        if row["name"] == "straight":
+        if row["radius"] is None or row["name"] == "straight":
             print(
                 f"{row['name']}: line R=∞m "
                 f"forward_distance={row['forward_displacement_m']:.3f}m "
