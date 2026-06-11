@@ -29,6 +29,15 @@ MAX_TURN_STRAIGHTNESS = 0.78
 MAX_TURN_CIRCLE_RMSE_OVER_RADIUS = 0.25
 MAX_TURN_CIRCLE_LINE_RMSE_RATIO = 0.90
 
+MIN_VALID_LINE_POINTS = 10
+MIN_VALID_LINE_NET_PX = 120.0
+MIN_VALID_LINE_PATH_PX = 160.0
+MAX_LINE_EDGE_FRACTION = 0.60
+BOTTOM_LEFT_X_FRAC = 0.42
+BOTTOM_Y_FRAC = 0.72
+RIGHT_EDGE_X_FRAC = 0.90
+TOP_EDGE_Y_FRAC = 0.06
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Export video_analysis JSON using the legacy start-to-wall tracker.")
@@ -100,6 +109,67 @@ def straight_distance(points) -> float:
     if len(points) < 2:
         return 0.0
     return float(np.hypot(points[-1][1] - points[0][1], points[-1][2] - points[0][2]))
+
+
+def first_frame_shape(video_path: Path) -> tuple[int, int] | None:
+    cap = cv2.VideoCapture(str(video_path))
+    ok, frame = cap.read()
+    cap.release()
+    if not ok or frame is None:
+        return None
+    h, w = frame.shape[:2]
+    return int(h), int(w)
+
+
+def line_track_quality(points, video_path: Path) -> dict:
+    point_count = len(points)
+    net_px = straight_distance(points)
+    path_px = path_distance(points)
+    quality = {
+        "valid_track": True,
+        "invalid_reason": None,
+        "valid_line_point_count": point_count,
+        "valid_line_net_px": net_px,
+        "valid_line_path_px": path_px,
+        "valid_line_edge_fraction": 0.0,
+        "valid_line_corner_like": False,
+    }
+
+    if point_count < MIN_VALID_LINE_POINTS:
+        return {**quality, "valid_track": False, "invalid_reason": "too few tracked points"}
+    if net_px < MIN_VALID_LINE_NET_PX or path_px < MIN_VALID_LINE_PATH_PX:
+        return {**quality, "valid_track": False, "invalid_reason": "track is too short"}
+
+    shape = first_frame_shape(video_path)
+    if shape is None:
+        return quality
+    h, w = shape
+    xy = np.asarray([[p[1], p[2]] for p in points], dtype=float)
+    median_x = float(np.median(xy[:, 0]))
+    median_y = float(np.median(xy[:, 1]))
+    bottom_left = median_x < BOTTOM_LEFT_X_FRAC * w and median_y > BOTTOM_Y_FRAC * h
+    edge_mask = (
+        (xy[:, 0] < 0.12 * w)
+        | (xy[:, 0] > RIGHT_EDGE_X_FRAC * w)
+        | (xy[:, 1] < TOP_EDGE_Y_FRAC * h)
+        | (xy[:, 1] > 0.78 * h)
+    )
+    edge_fraction = float(np.mean(edge_mask))
+    quality.update(
+        {
+            "valid_line_median_x_px": median_x,
+            "valid_line_median_y_px": median_y,
+            "valid_line_frame_width_px": w,
+            "valid_line_frame_height_px": h,
+            "valid_line_edge_fraction": edge_fraction,
+            "valid_line_corner_like": bool(bottom_left),
+        }
+    )
+    if bottom_left:
+        return {**quality, "valid_track": False, "invalid_reason": "track is concentrated in bottom-left overlay/corner"}
+    if edge_fraction >= MAX_LINE_EDGE_FRACTION:
+        return {**quality, "valid_track": False, "invalid_reason": "too many points are on image edges"}
+    return quality
 
 
 def choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit):
@@ -187,6 +257,31 @@ def draw_text_outline(frame, text: str, org: tuple[int, int], scale: float = 0.8
     cv2.putText(frame, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
 
 
+def draw_invalid_preview(video_path: Path, seconds: float, out_path: Path, reason: str, point_count: int) -> None:
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
+    cap.set(cv2.CAP_PROP_POS_FRAMES, int(round(seconds * fps)))
+    ok, frame = cap.read()
+    if not ok:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        ok, frame = cap.read()
+    cap.release()
+    if not ok or frame is None:
+        return
+    lines = [
+        "Invalid track  REAL",
+        f"Real: {point_count} pts",
+        "speed invalid",
+        "forward invalid",
+        reason[:36],
+    ]
+    x, y = 28, 48
+    for line in lines:
+        draw_text_outline(frame, line, (x, y), scale=0.78)
+        y += 32
+    cv2.imwrite(str(out_path), frame)
+
+
 def annotate_preview(preview_path: Path, result: dict) -> None:
     if not preview_path.exists():
         return
@@ -194,7 +289,15 @@ def annotate_preview(preview_path: Path, result: dict) -> None:
     if frame is None:
         return
 
-    if result.get("fit_kind") == "line":
+    if result.get("fit_kind") == "invalid_track":
+        lines = [
+            "Invalid track  REAL",
+            f"Real: {result.get('point_count', 0)} pts",
+            "speed invalid",
+            "forward invalid",
+            str(result.get("invalid_reason", "check tracking"))[:36],
+        ]
+    elif result.get("fit_kind") == "line":
         speed = result.get("forward_speed_m_s")
         speed_text = "nan" if speed is None else f"{speed:.3f} m/s"
         lines = [
@@ -241,19 +344,29 @@ def process_video(
     fit = probe_fit
     selected_fit_kind = probe_fit_kind
     measurement_mode = "turn_8s_probe"
+    track_quality = {"valid_track": True, "invalid_reason": None}
 
     if probe_fit_kind == "line":
         clip = make_line_clip(video_path)
         points = detect_points(clip, Path.cwd())
-        curve, fit, selected_fit_kind = fit_points(points, "line")
-        measurement_mode = "line_13s_after_no_turn"
+        track_quality = line_track_quality(points, video_path)
+        if not track_quality["valid_track"]:
+            curve = None
+            fit = {"kind": "invalid_track", "status": "filtered_too_short_or_corner", "rmse_px": None}
+            selected_fit_kind = "invalid_track"
+            measurement_mode = "invalid_line_after_no_turn"
+        else:
+            curve, fit, selected_fit_kind = fit_points(points, "line")
+            measurement_mode = "line_13s_after_no_turn"
 
     preview_path = out_dir / preview_name
     if write_preview and curve is not None:
         draw_fit(video_path, clip.wall_seconds, points, curve, preview_path)
+    elif write_preview and selected_fit_kind == "invalid_track":
+        draw_invalid_preview(video_path, clip.wall_seconds, preview_path, str(track_quality.get("invalid_reason") or "invalid track"), len(points))
 
     result = {
-        "tracker_version": "legacy_start_to_wall_preview_v5_probe8_line13",
+        "tracker_version": "legacy_start_to_wall_preview_v6_probe8_line13_invalid_filter",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
@@ -261,6 +374,8 @@ def process_video(
         "requested_fit_kind": "auto_probe_then_measure",
         "fit_kind": selected_fit_kind,
         "measurement_mode": measurement_mode,
+        "valid_track": bool(track_quality.get("valid_track", True)),
+        "invalid_reason": track_quality.get("invalid_reason"),
         "wall_seconds": clip.wall_seconds,
         "probe_wall_seconds": probe_clip.wall_seconds,
         "probe_point_count": len(probe_points),
@@ -271,6 +386,7 @@ def process_video(
         "probe_auto_fit_circle_rmse_px": probe_fit.get("auto_fit_circle_rmse_px"),
         "probe_auto_fit_circle_rmse_over_radius": probe_fit.get("auto_fit_circle_rmse_over_radius"),
         "probe_auto_fit_circle_arc_deg": probe_fit.get("auto_fit_circle_arc_deg"),
+        **track_quality,
         "roi": list(clip.roi),
         "min_y": clip.min_y,
         "points": [list(p) for p in points],
@@ -279,10 +395,10 @@ def process_video(
         "straight_distance_px": straight_distance(points),
         "path_distance_px": path_distance(points),
         **fit,
-        "preview_image": str(preview_path) if write_preview and curve is not None else None,
+        "preview_image": str(preview_path) if write_preview else None,
     }
     result = add_metric_units(result, fit, selected_fit_kind, clip.wall_seconds, px_per_m)
-    if write_preview and curve is not None:
+    if write_preview and preview_path.exists():
         annotate_preview(preview_path, result)
 
     out_path = out_dir / output_name
@@ -292,7 +408,7 @@ def process_video(
         radius = "nan" if result["radius_px"] is None else f"{result['radius_px']:.3f}"
         rmse = "nan" if result["rmse_px"] is None else f"{result['rmse_px']:.3f}"
         print(f"fit=circle mode={measurement_mode} points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
-    else:
+    elif selected_fit_kind == "line":
         speed = result.get("forward_speed_m_s")
         speed_text = "nan" if speed is None else f"{speed:.4f}m/s"
         print(
@@ -300,6 +416,8 @@ def process_video(
             f"forward_px={result.get('forward_distance_px', 0.0):.3f} "
             f"speed={speed_text} rmse_px={result.get('rmse_px', 0.0):.3f} preview={result['preview_image']}"
         )
+    else:
+        print(f"fit=invalid mode={measurement_mode} points={len(points)} reason={result.get('invalid_reason')} preview={result['preview_image']}")
     return out_path
 
 
