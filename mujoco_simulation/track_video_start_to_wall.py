@@ -33,11 +33,82 @@ CLIPS = (
     ),
 )
 
+# Keep detections inside the real water region. This is not a post-fit corner classifier;
+# it prevents wall labels, tank rim, timestamp, and D-Link overlays from becoming candidates.
+FRAME_X_MIN = 125
+FRAME_X_MAX_PAD = 90
+FRAME_Y_TOP_PAD = 70
+FRAME_Y_BOTTOM_PAD = 135
+ROI_EDGE_PAD = 18
+MAX_STEP_PX = 180.0
+SOFT_MAX_STEP_PX = 95.0
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Track video center points from start to wall contact.")
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/video_start_to_wall"))
     return parser.parse_args()
+
+
+def valid_frame_bounds(frame_shape, clip: ClipConfig) -> tuple[float, float, float, float]:
+    h, w = frame_shape[:2]
+    x0, y0, rw, rh = clip.roi
+    left = max(float(FRAME_X_MIN), float(x0 + ROI_EDGE_PAD))
+    right = min(float(w - FRAME_X_MAX_PAD), float(x0 + rw - ROI_EDGE_PAD))
+    top = max(float(clip.min_y), float(y0 + FRAME_Y_TOP_PAD))
+    bottom = min(float(h - FRAME_Y_BOTTOM_PAD), float(y0 + rh - ROI_EDGE_PAD))
+    return left, top, right, bottom
+
+
+def inside_bounds(gx: float, gy: float, bounds: tuple[float, float, float, float]) -> bool:
+    left, top, right, bottom = bounds
+    return left <= gx <= right and top <= gy <= bottom
+
+
+def component_quality(area: int, width: int, height: int) -> float | None:
+    if area < 70 or area > 6500:
+        return None
+    if width < 5 or height < 5:
+        return None
+    aspect = max(width / max(height, 1), height / max(width, 1))
+    if aspect > 10.0:
+        return None
+    fill_ratio = area / max(width * height, 1)
+    if fill_ratio < 0.10 or fill_ratio > 0.92:
+        return None
+    return float(area) * (1.0 + 0.25 * min(aspect, 4.0))
+
+
+def continuity_score(gx: float, gy: float, area: int, quality: float, prev) -> float:
+    if prev is None:
+        # Start from the lower-middle water region, not the side overlays.
+        return quality - 0.35 * abs(gx - 560.0) - 0.18 * abs(gy - 1320.0)
+    dist = float(np.hypot(gx - prev[0], gy - prev[1]))
+    if dist > MAX_STEP_PX:
+        return -1e9
+    jump_penalty = 3.0 * max(0.0, dist - SOFT_MAX_STEP_PX)
+    return quality + 0.018 * area - 2.15 * dist - jump_penalty
+
+
+def build_turn_mask(crop: np.ndarray, roi_top: int) -> np.ndarray:
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    blue, green, red = cv2.split(crop)
+    saturation = hsv[:, :, 1]
+    value = hsv[:, :, 2]
+
+    # White/gray eel body plus dark marker/holes, but reject overexposed glare and blue tank.
+    nonblue = (blue.astype(np.int16) - red.astype(np.int16) < 42) & (blue.astype(np.int16) - green.astype(np.int16) < 42)
+    body = (saturation < 88) & (value > 45) & (value < 248) & nonblue
+    dark_marker = (value < 92) & nonblue
+    mask = ((body | dark_marker).astype(np.uint8)) * 255
+
+    # The top strip of each ROI is usually glare/tank edge, not the eel.
+    mask[: max(70, min(130, 1040 - roi_top)), :] = 0
+    kernel3 = np.ones((3, 3), np.uint8)
+    kernel5 = np.ones((5, 5), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel3)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel5)
+    return mask
 
 
 def detect_points(clip: ClipConfig, root: Path) -> list[tuple[float, float, float, int]]:
@@ -57,35 +128,39 @@ def detect_points(clip: ClipConfig, root: Path) -> list[tuple[float, float, floa
         ok, frame = cap.read()
         if not ok:
             break
+        bounds = valid_frame_bounds(frame.shape, clip)
         x0, y0, w, h = roi
         crop = frame[y0 : y0 + h, x0 : x0 + w]
-        hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
-        low_sat = (hsv[:, :, 1] < 75) & (hsv[:, :, 2] > 35)
-        dark = hsv[:, :, 2] < 90
-        mask = ((low_sat | dark).astype(np.uint8)) * 255
-        if roi[1] < 100:
-            mask[:70, :] = 0
-        else:
-            mask[:100, :] = 0
-        kernel = np.ones((5, 5), np.uint8)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        mask = build_turn_mask(crop, y0)
 
         count, _, stats, centroids = cv2.connectedComponentsWithStats(mask, 8)
         candidates = []
         for i in range(1, count):
             area = int(stats[i, cv2.CC_STAT_AREA])
+            bx = int(stats[i, cv2.CC_STAT_LEFT])
+            by = int(stats[i, cv2.CC_STAT_TOP])
+            bw = int(stats[i, cv2.CC_STAT_WIDTH])
+            bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+            quality = component_quality(area, bw, bh)
+            if quality is None:
+                continue
+            if bx <= ROI_EDGE_PAD or by <= ROI_EDGE_PAD or bx + bw >= w - ROI_EDGE_PAD or by + bh >= h - ROI_EDGE_PAD:
+                continue
             cx, cy = centroids[i]
             gx, gy = float(x0 + cx), float(y0 + cy)
-            if 80 <= area <= 12000 and 120 < gx < 960 and clip.min_y < gy < 1840:
-                score = area if prev is None else -np.hypot(gx - prev[0], gy - prev[1]) + 0.015 * area
-                candidates.append((float(score), gx, gy, area))
+            if not inside_bounds(gx, gy, bounds):
+                continue
+            score = continuity_score(gx, gy, area, quality, prev)
+            if score <= -1e8:
+                continue
+            candidates.append((float(score), gx, gy, area))
         if candidates:
             candidates.sort(reverse=True)
             _, gx, gy, area = candidates[0]
             prev = (gx, gy)
             raw.append((float(frame_idx / fps), gx, gy, area))
 
+    cap.release()
     return clean_points(raw, clip.min_y)
 
 
@@ -101,6 +176,7 @@ def detect_dark_marker_points(clip: ClipConfig, root: Path) -> list[tuple[float,
         ok, frame = cap.read()
         if not ok:
             break
+        bounds = valid_frame_bounds(frame.shape, clip)
         blue, green, red = cv2.split(frame)
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         dark = hsv[:, :, 2] < 105
@@ -115,19 +191,31 @@ def detect_dark_marker_points(clip: ClipConfig, root: Path) -> list[tuple[float,
         candidates = []
         for i in range(1, count):
             area = int(stats[i, cv2.CC_STAT_AREA])
+            bx = int(stats[i, cv2.CC_STAT_LEFT])
+            by = int(stats[i, cv2.CC_STAT_TOP])
+            bw = int(stats[i, cv2.CC_STAT_WIDTH])
+            bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+            quality = component_quality(area, bw, bh)
+            if quality is None:
+                continue
             cx, cy = centroids[i]
-            if 20 <= area <= 8000 and 80 < cx < 950 and 40 < cy < 1850:
-                if previous is None:
-                    score = -abs(cx - 525) - 0.25 * abs(cy - 350) + 0.02 * area
-                else:
-                    score = -np.hypot(cx - previous[0], cy - previous[1]) + 0.01 * area
-                candidates.append((float(score), float(cx), float(cy), area))
+            if not inside_bounds(float(cx), float(cy), bounds):
+                continue
+            if previous is None:
+                score = quality - 0.30 * abs(cx - 525) - 0.18 * abs(cy - 350)
+            else:
+                dist = float(np.hypot(cx - previous[0], cy - previous[1]))
+                if dist > MAX_STEP_PX:
+                    continue
+                score = quality - 2.0 * dist + 0.01 * area
+            candidates.append((float(score), float(cx), float(cy), area))
         if candidates:
             candidates.sort(reverse=True)
             _, cx, cy, area = candidates[0]
             previous = (cx, cy)
             points.append((float(frame_idx / fps), cx, cy, area))
-    return points
+    cap.release()
+    return clean_points(points, clip.min_y)
 
 
 def clean_points(points: list[tuple[float, float, float, int]], min_y: float) -> list[tuple[float, float, float, int]]:
@@ -140,9 +228,19 @@ def clean_points(points: list[tuple[float, float, float, int]], min_y: float) ->
         previous = xy[i - 1]
         current = xy[i]
         next_point = xy[i + 1]
-        if np.linalg.norm(current - previous) > 280 and np.linalg.norm(current - next_point) > 280:
+        if np.linalg.norm(current - previous) > 180 and np.linalg.norm(current - next_point) > 180:
             keep[i] = False
-    return [point for point, should_keep in zip(points, keep) if should_keep]
+    cleaned = [point for point, should_keep in zip(points, keep) if should_keep]
+    if len(cleaned) >= 5:
+        xy2 = np.array([[point[1], point[2]] for point in cleaned], dtype=float)
+        smoothed = []
+        for i, point in enumerate(cleaned):
+            lo = max(0, i - 1)
+            hi = min(len(cleaned), i + 2)
+            mx, my = np.median(xy2[lo:hi], axis=0)
+            smoothed.append((point[0], float(mx), float(my), point[3]))
+        return smoothed
+    return cleaned
 
 
 def fit_circle(xy: np.ndarray):
