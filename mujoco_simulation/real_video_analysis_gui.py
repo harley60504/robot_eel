@@ -96,7 +96,7 @@ class RealVideoAnalysisApp:
         ).grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
         ttk.Label(
             options,
-            text="Selected MP4s go to real_video_analysis. Selected JSON gaits go to MuJoCo, trajectory CSV, trajectory PNG, fitted-R PNG, and fitted summary JSON.",
+            text="Output filenames for selected JSON gaits use the selected JSON filename stem.",
         ).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
 
         button_row = ttk.Frame(outer)
@@ -311,14 +311,8 @@ class RealVideoAnalysisApp:
         self.logger.write(f"fit_out={fit_out}\n")
 
         used_names: set[str] = set()
-        rows = []
         for gait_path in gait_paths:
-            row = self._run_one_json_gait(gait_path, used_names, sim_out, fit_out)
-            rows.append(row)
-
-        combined_path = fit_out / "selected_json_gaits_summary.json"
-        combined_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-        self.logger.write(f"\nSelected JSON gait summary: {combined_path}\n")
+            self._run_one_json_gait(gait_path, used_names, sim_out, fit_out)
 
     def _run_one_json_gait(self, gait_path: Path, used_names: set[str], sim_out: Path, fit_out: Path) -> dict:
         gait_path = gait_path.expanduser().resolve()
@@ -330,7 +324,7 @@ class RealVideoAnalysisApp:
         if arr.size == 0:
             raise RuntimeError(f"No MuJoCo trajectory was produced for {gait_path}")
 
-        name = self._unique_name(str(gait.get("name", gait_path.stem)), used_names, sim_out, fit_out)
+        name = self._unique_name(gait_path.stem, used_names, sim_out, fit_out)
         csv_path = sim_out / f"{name}_trajectory.csv"
         np.savetxt(csv_path, arr, delimiter=",", header="time,x,y,yaw", comments="")
 
@@ -340,6 +334,7 @@ class RealVideoAnalysisApp:
 
         fixed_summary = {
             "name": name,
+            "gait_name_in_json": gait.get("name"),
             "source_gait_json": str(gait_path),
             "trajectory_csv": str(csv_path),
             "trajectory_png": str(trajectory_png),
@@ -354,6 +349,7 @@ class RealVideoAnalysisApp:
         fitted_summary = self._write_json_gait_fitted_plot(fitted_png, name, arr)
         fitted_summary.update(
             {
+                "gait_name_in_json": gait.get("name"),
                 "source_gait_json": str(gait_path),
                 "trajectory_csv": str(csv_path),
                 "trajectory_png": str(trajectory_png),
@@ -368,6 +364,7 @@ class RealVideoAnalysisApp:
 
         radius = fitted_summary.get("radius")
         radius_text = "line/inf" if radius is None else f"{float(radius):.4f}m"
+        self.logger.write(f"  output base name: {name}\n")
         self.logger.write(f"  trajectory CSV: {csv_path}\n")
         self.logger.write(f"  trajectory plot: {trajectory_png}\n")
         self.logger.write(f"  fitted plot: {fitted_png}\n")
