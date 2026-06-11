@@ -57,6 +57,7 @@ def parse_args():
         help="hopf uses oscillator state; sin directly computes joint angles from time.",
     )
     parser.add_argument("--print-hz", type=float, default=2.0)
+    parser.add_argument("--viewer-fps", type=float, default=60.0, help="Viewer render FPS used for real-time pacing.")
     parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
     parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
     parser.add_argument("--reset-x-min", type=float, default=RESET_X_MIN)
@@ -127,7 +128,8 @@ def main():
         f"  wavelength: {args.before_wavelength:.4f} -> {args.after_wavelength:.4f}\n"
         f"  phase lag:  {1.0 / args.before_wavelength:.4f} -> {1.0 / args.after_wavelength:.4f} rad/joint\n"
         f"  amp scale:  {args.before_amp_scale:.3f} -> {args.after_amp_scale:.3f} ({args.amp_mode} mode)\n"
-        f"  Hopf gains: alpha={args.alpha:.3f}, k_couple={args.k_couple:.3f}, k_anchor={args.k_anchor:.3f}",
+        f"  Hopf gains: alpha={args.alpha:.3f}, k_couple={args.k_couple:.3f}, k_anchor={args.k_anchor:.3f}\n"
+        "  viewer pacing: real-time wall-clock pacing with batched MuJoCo steps",
         flush=True,
     )
 
@@ -138,32 +140,46 @@ def main():
             viewer.cam.elevation = -70
             viewer.cam.azimuth = 0
 
+        target_fps = max(args.viewer_fps, 1.0)
+        frame_dt = 1.0 / target_fps
+        last_wall_clock = time.perf_counter()
+        base_pos = data.xpos[base_body_id]
+        params = make_params(args, False)
+        switched = False
+
         while viewer.is_running():
-            if args.repeat and data.time >= args.switch_time:
-                switched = int((data.time - args.switch_time) // max(args.switch_period, model.opt.timestep)) % 2 == 0
-            else:
-                switched = data.time >= args.switch_time
-            params = make_params(args, switched)
-            if args.control_mode == "sin":
-                targets = sine_targets(data.time, args, switched)
-            else:
-                targets = cpg.step(data.time, model.opt.timestep, params)
-            data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
-            mujoco.mj_step(model, data)
-            base_pos = data.xpos[base_body_id]
+            frame_start = time.perf_counter()
+            wall_dt = min(frame_start - last_wall_clock, 0.05)
+            last_wall_clock = frame_start
+            target_sim_time = data.time + wall_dt
 
-            if switched != last_switched:
-                state = "AFTER" if switched else "BEFORE"
-                print(f"mode={state} at t={data.time:.2f}s", flush=True)
-                last_switched = switched
-
-            if base_pos[0] < args.reset_x_min or base_pos[0] > args.reset_x_max or abs(base_pos[1]) > args.reset_y:
-                print(
-                    f"reset to start: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}",
-                    flush=True,
-                )
-                reset_to_start()
+            while data.time + 1e-12 < target_sim_time:
+                if args.repeat and data.time >= args.switch_time:
+                    switched = int((data.time - args.switch_time) // max(args.switch_period, model.opt.timestep)) % 2 == 0
+                else:
+                    switched = data.time >= args.switch_time
+                params = make_params(args, switched)
+                if args.control_mode == "sin":
+                    targets = sine_targets(data.time, args, switched)
+                else:
+                    targets = cpg.step(data.time, model.opt.timestep, params)
+                data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
+                mujoco.mj_step(model, data)
                 base_pos = data.xpos[base_body_id]
+
+                if switched != last_switched:
+                    state = "AFTER" if switched else "BEFORE"
+                    print(f"mode={state} at t={data.time:.2f}s", flush=True)
+                    last_switched = switched
+
+                if base_pos[0] < args.reset_x_min or base_pos[0] > args.reset_x_max or abs(base_pos[1]) > args.reset_y:
+                    print(
+                        f"reset to start: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}",
+                        flush=True,
+                    )
+                    reset_to_start()
+                    base_pos = data.xpos[base_body_id]
+                    break
 
             now = time.time()
             if now - last_print >= print_period:
@@ -182,7 +198,11 @@ def main():
                 viewer.cam.lookat[0] = base_pos[0]
                 viewer.cam.lookat[1] = base_pos[1]
             viewer.sync()
-            time.sleep(model.opt.timestep)
+
+            elapsed = time.perf_counter() - frame_start
+            sleep_time = frame_dt - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
 
 
 if __name__ == "__main__":

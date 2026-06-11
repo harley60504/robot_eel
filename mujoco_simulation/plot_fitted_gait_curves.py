@@ -148,6 +148,36 @@ def draw_rotated_tank(ax):
     ax.set_ylabel("forward (m)")
 
 
+def sim_metric_text(name: str, fit: dict, metrics: dict) -> str:
+    if name == "straight":
+        return (
+            "R = ∞ m\n"
+            f"d_forward = {metrics['forward_displacement_m']:.3f} m\n"
+            f"v_forward = {metrics['mean_forward_speed_m_s']:.3f} m/s\n"
+            f"lateral drift = {metrics['lateral_drift_m']:.3f} m"
+        )
+    radius_text = "∞ m" if fit["radius"] is None else f"{fit['radius']:.3f} m"
+    return (
+        f"R = {radius_text}\n"
+        f"v = {metrics['mean_speed_m_s']:.3f} m/s\n"
+        f"arc = {fit['arc_deg']:.1f} deg\n"
+        f"RMSE = {fit['rmse']:.3f}"
+    )
+
+
+def add_sim_metric_box(ax, text: str) -> None:
+    ax.text(
+        0.28,
+        0.97,
+        text,
+        transform=ax.transAxes,
+        va="top",
+        ha="right",
+        fontsize=9,
+        bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.88, edgecolor="#cccccc"),
+    )
+
+
 def plot_sim_curves(sim_dir: Path, out_dir: Path):
     rows = []
     colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
@@ -168,7 +198,7 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         rows.append({"name": name, **fit, **metrics})
 
     ax.set_title("MuJoCo fitted curves, rotated to camera view")
-    ax.legend(loc="upper right", fontsize=8)
+    ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out_dir / "sim_fitted_curves_rotated.png")
     plt.close(fig)
@@ -185,25 +215,8 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=3.0)
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
-        if name == "straight":
-            ax.set_title("straight fitted curve")
-            ax.text(
-                0.03,
-                0.97,
-                "R = ∞ m\n"
-                f"d_forward = {metrics['forward_displacement_m']:.3f} m\n"
-                f"v_forward = {metrics['mean_forward_speed_m_s']:.3f} m/s\n"
-                f"lateral drift = {metrics['lateral_drift_m']:.3f} m",
-                transform=ax.transAxes,
-                va="top",
-                ha="left",
-                fontsize=9,
-                bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.88, edgecolor="#cccccc"),
-            )
-        else:
-            radius_text = "R=∞ m" if fit["radius"] is None else f"R={fit['radius']:.3f} m"
-            speed_text = f"v={metrics['mean_speed_m_s']:.3f} m/s"
-            ax.set_title(f"{name} fitted curve ({radius_text}, {speed_text})")
+        ax.set_title(f"{name} fitted curve")
+        add_sim_metric_box(ax, sim_metric_text(name, fit, metrics))
         fig.tight_layout()
         fig.savefig(out_dir / f"sim_{name}_fitted_rotated.png")
         plt.close(fig)
@@ -270,12 +283,42 @@ def real_speed_from_summary(summary_data: dict, distance_metrics: dict) -> float
     return float(distance_metrics.get("path_distance_px", 0.0)) / PX_PER_M / duration
 
 
-def put_metric_label(frame, lines: list[str], org=(40, 70)) -> None:
-    x, y = org
-    for line in lines:
-        cv2.putText(frame, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 0), 5, cv2.LINE_AA)
-        cv2.putText(frame, line, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 255, 255), 2, cv2.LINE_AA)
-        y += 34
+def draw_metric_box(frame, lines: list[str], font_scale: float = 0.9) -> None:
+    h, w = frame.shape[:2]
+    pad = 14
+    line_gap = 12
+    thickness = 2
+    outline = 4
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    sizes = [cv2.getTextSize(line, font, font_scale, thickness)[0] for line in lines]
+    text_w = max((s[0] for s in sizes), default=0)
+    text_h_total = sum(s[1] for s in sizes) + line_gap * max(0, len(lines) - 1)
+    box_w = text_w + pad * 2
+    box_h = text_h_total + pad * 2
+
+    left = 12
+    top = max(10, int(0.03 * h))
+    right = left + box_w
+    bottom = top + box_h
+
+    left = max(10, left)
+    top = max(10, top)
+    right = min(w - 10, left + box_w)
+    bottom = min(h - 10, top + box_h)
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (left, top), (right, bottom), (255, 255, 255), -1)
+    cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
+    cv2.rectangle(frame, (left, top), (right, bottom), (200, 200, 200), 2)
+
+    y = top + pad
+    for line, size in zip(lines, sizes):
+        baseline_y = y + size[1]
+        x = right - pad - size[0]
+        cv2.putText(frame, line, (x, baseline_y), font, font_scale, (0, 0, 0), outline, cv2.LINE_AA)
+        cv2.putText(frame, line, (x, baseline_y), font, font_scale, (40, 40, 40), thickness, cv2.LINE_AA)
+        y = baseline_y + line_gap
 
 
 def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str, summary_path: Path):
@@ -368,7 +411,7 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
 
         radius_text = "nan" if radius_m is None else f"{radius_m:.3f} m"
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        put_metric_label(frame, [f"{label}: R={radius_text}", f"v={speed_text}, RMSE={fit['rmse']:.1f}px"])
+        draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"arc = {fit['arc_deg']:.1f} deg", f"RMSE = {fit['rmse']:.1f}px"])
         out_img = out_dir / f"video_{stem}_fit_curve.png"
         out_json = out_dir / f"video_{stem}_fit_summary.json"
 
@@ -395,13 +438,14 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
             }
         )
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        put_metric_label(frame, [f"{label}: R=∞ m", f"v={speed_text}, forward={float(forward_m):.3f} m"])
+        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {summary_data.get('rmse_px', 0.0):.1f}px"])
         out_img = out_dir / f"video_{stem}_straight_distance.png"
         out_json = out_dir / f"video_{stem}_straight_distance_summary.json"
 
     cv2.imwrite(str(out_img), frame)
     out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return out_img, summary
+
 
 def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: Path):
     rows = []
