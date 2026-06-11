@@ -1,0 +1,17 @@
+{
+  "name": "rl_turn_right_2",
+  "source_gait_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\rl_gaits\\rl_turn_right.json",
+  "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\rl_turn_right_2_trajectory.csv",
+  "trajectory_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\rl_turn_right_2_trajectory.png",
+  "duration_s": 8.197000000000896,
+  "hit_wall": true,
+  "dx": -0.05907753461854848,
+  "dy": -0.6634459711686644,
+  "yaw_change_rad": -2.6570369040693818,
+  "yaw_change_deg": -152.23700061368217,
+  "yaw_rate_rad_s": -0.32418703075513555,
+  "speed_m_s": 0.0812678259061652,
+  "forward_speed_m_s": -0.007208093535693266,
+  "lateral_speed_m_s": -0.08094753186537236,
+  "turn_radius_m": 0.2506819156733888
+}
