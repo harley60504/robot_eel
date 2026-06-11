@@ -25,27 +25,27 @@ DEFAULT_PX_PER_M = 875.0 / 1.5
 PROBE_SECONDS = 8.0
 LINE_MEASURE_SECONDS = 13.0
 SAMPLE_HZ = 5.0
-TOP_CANDIDATES_PER_FRAME = 12
-MAX_LINK_STEP_PX = 210.0
-MAX_SEGMENT_JUMP_PX = 190.0
+TOP_CANDIDATES_PER_FRAME = 18
+MAX_LINK_STEP_PX = 240.0
+MAX_SEGMENT_JUMP_PX = 220.0
 
-MIN_PROBE_POINTS = 6
-MIN_PROBE_NET_PX = 45.0
-MIN_PROBE_PATH_PX = 55.0
-MIN_LINE_POINTS = 10
-MIN_LINE_NET_PX = 120.0
-MIN_LINE_PATH_PX = 160.0
+MIN_PROBE_POINTS = 5
+MIN_PROBE_NET_PX = 35.0
+MIN_PROBE_PATH_PX = 45.0
+MIN_LINE_POINTS = 8
+MIN_LINE_NET_PX = 90.0
+MIN_LINE_PATH_PX = 120.0
 
-MIN_TURN_NET_PX = 60.0
-MIN_TURN_ARC_DEG = 30.0
-MIN_TURN_HEADING_DEG = 25.0
-MIN_TURN_LATERAL_SPAN_PX = 80.0
-MIN_TURN_LATERAL_DISP_PX = 70.0
-MAX_TURN_STRAIGHTNESS = 0.96
-MAX_TURN_RMSE_OVER_RADIUS = 0.75
+MIN_TURN_NET_PX = 45.0
+MIN_TURN_ARC_DEG = 24.0
+MIN_TURN_HEADING_DEG = 20.0
+MIN_TURN_LATERAL_SPAN_PX = 65.0
+MIN_TURN_LATERAL_DISP_PX = 55.0
+MAX_TURN_STRAIGHTNESS = 0.965
+MAX_TURN_RMSE_OVER_RADIUS = 0.90
 MIN_TURN_SCORE = 2
 
-EDGE_FRACTION_LIMIT = 0.65
+EDGE_FRACTION_LIMIT = 0.62
 BOTTOM_LEFT_X_FRAC = 0.42
 BOTTOM_Y_FRAC = 0.72
 RIGHT_EDGE_X_FRAC = 0.92
@@ -127,6 +127,20 @@ def straight_distance(points) -> float:
     return float(np.linalg.norm(xy[-1] - xy[0]))
 
 
+def lateral_span_px(points) -> float:
+    xy = xy_from_points(points)
+    if len(xy) < 2:
+        return 0.0
+    return float(np.ptp(xy[:, 0]))
+
+
+def lateral_displacement_px(points) -> float:
+    xy = xy_from_points(points)
+    if len(xy) < 2:
+        return 0.0
+    return float(abs(xy[-1, 0] - xy[0, 0]))
+
+
 def first_frame_shape(video_path: Path) -> tuple[int, int] | None:
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
@@ -140,10 +154,10 @@ def first_frame_shape(video_path: Path) -> tuple[int, int] | None:
 def valid_frame_bounds(frame_shape, clip: ClipConfig) -> tuple[float, float, float, float]:
     h, w = frame_shape[:2]
     x0, y0, rw, rh = clip.roi
-    left = max(120.0, float(x0 + 14))
-    right = min(float(w - 70), float(x0 + rw - 14))
+    left = max(120.0, float(x0 + 18))
+    right = min(float(w - 80), float(x0 + rw - 18))
     top = max(float(clip.min_y), float(y0 + 45))
-    bottom = min(float(h - 105), float(y0 + rh - 14))
+    bottom = min(float(h - 120), float(y0 + rh - 18))
     return left, top, right, bottom
 
 
@@ -152,6 +166,8 @@ def is_forbidden_point(x: float, y: float, frame_shape) -> bool:
     if x < BOTTOM_LEFT_X_FRAC * w and y > BOTTOM_Y_FRAC * h:
         return True
     if x > RIGHT_EDGE_X_FRAC * w or y < TOP_EDGE_Y_FRAC * h:
+        return True
+    if y > 0.82 * h:
         return True
     return False
 
@@ -162,44 +178,78 @@ def inside_bounds(x: float, y: float, bounds: tuple[float, float, float, float])
 
 
 def component_quality(area: int, width: int, height: int) -> float | None:
-    if area < 45 or area > 12000:
+    if area < 55 or area > 22000:
         return None
-    if width < 4 or height < 4:
+    if width < 5 or height < 5:
         return None
     aspect = max(width / max(height, 1), height / max(width, 1))
-    if aspect > 14.0:
+    if aspect > 18.0:
         return None
     fill_ratio = area / max(width * height, 1)
-    if fill_ratio < 0.05 or fill_ratio > 0.97:
+    if fill_ratio < 0.035 or fill_ratio > 0.985:
         return None
-    return float(area) * (1.0 + 0.20 * min(aspect, 5.0))
+    elongation_bonus = min(aspect, 8.0)
+    size_bonus = min(area / 1800.0, 5.0)
+    return float(area) * (1.0 + 0.18 * elongation_bonus + 0.12 * size_bonus)
+
+
+def remove_glare_and_edges(mask: np.ndarray, crop: np.ndarray) -> np.ndarray:
+    hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
+    sat = hsv[:, :, 1]
+    val = hsv[:, :, 2]
+    blue, green, red = cv2.split(crop)
+    maxc = np.maximum(np.maximum(red, green), blue)
+    minc = np.minimum(np.minimum(red, green), blue)
+
+    glare = (val > 242) & (sat < 48)
+    water_blue = (blue.astype(np.int16) - red.astype(np.int16) > 58) & (blue.astype(np.int16) - green.astype(np.int16) > 36)
+    extreme_chroma_water = water_blue & (sat > 55)
+    weak_texture = ((maxc.astype(np.int16) - minc.astype(np.int16)) < 10) & (val > 210)
+
+    reject = glare | extreme_chroma_water | weak_texture
+    mask[reject] = 0
+    return mask
 
 
 def build_mask(crop: np.ndarray, clip: ClipConfig, roi_top: int) -> np.ndarray:
     hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
     blue, green, red = cv2.split(crop)
+    hue = hsv[:, :, 0]
     sat = hsv[:, :, 1]
     val = hsv[:, :, 2]
     maxc = np.maximum(np.maximum(red, green), blue)
     minc = np.minimum(np.minimum(red, green), blue)
+    chroma = maxc.astype(np.int16) - minc.astype(np.int16)
 
-    # Wider color detection: accept white/gray eel, darker body/marker, and mildly colored body,
-    # while still rejecting strongly blue water background and overexposed glare.
-    nonblue = (blue.astype(np.int16) - red.astype(np.int16) < 75) & (blue.astype(np.int16) - green.astype(np.int16) < 75)
-    grayish = (sat < 135) & (val > 32) & (val < 255) & nonblue
-    dark_body = (val < 135) & (val > 18) & nonblue
-    low_chroma = ((maxc.astype(np.int16) - minc.astype(np.int16)) < 95) & (val > 28) & nonblue
-    mask = ((grayish | dark_body | low_chroma).astype(np.uint8)) * 255
+    # Body-level detection rather than precise red-dot detection.
+    # Accept dark body, white shell, gray body, red marks, black marks, and mildly colored parts.
+    # Reject water-blue background, clipped glare, and static image corners later.
+    water_blue = (blue.astype(np.int16) - red.astype(np.int16) > 62) & (blue.astype(np.int16) - green.astype(np.int16) > 40) & (sat > 52)
+    non_water = ~water_blue
+    not_glare = ~((val > 244) & (sat < 55))
+
+    dark_body = (val >= 18) & (val <= 150) & non_water
+    white_shell = (sat <= 78) & (val >= 135) & (val <= 238) & non_water
+    gray_body = (chroma <= 90) & (val >= 32) & (val <= 235) & non_water
+    red_mark = (((hue <= 15) | (hue >= 165)) & (sat >= 45) & (val >= 45))
+    black_mark = (val <= 95) & (sat <= 170)
+    colored_body = (sat >= 35) & (sat <= 170) & (val >= 38) & (val <= 220) & non_water
+
+    mask = ((dark_body | white_shell | gray_body | red_mark | black_mark | colored_body) & not_glare).astype(np.uint8) * 255
+    mask = remove_glare_and_edges(mask, crop)
 
     if clip.fit_kind != "line":
-        mask[: max(55, min(115, 1040 - roi_top)), :] = 0
+        mask[: max(55, min(120, 1040 - roi_top)), :] = 0
     else:
         mask[:35, :] = 0
         mask[:, 1040:] = 0
 
     k3 = np.ones((3, 3), np.uint8)
     k5 = np.ones((5, 5), np.uint8)
+    k7 = np.ones((7, 7), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k3)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k7)
+    mask = cv2.dilate(mask, k3, iterations=1)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k5)
     return mask
 
@@ -220,7 +270,7 @@ def candidates_for_frame(frame: np.ndarray, frame_index: int, time_s: float, cli
         quality = component_quality(area, bw, bh)
         if quality is None:
             continue
-        if bx <= 12 or by <= 12 or bx + bw >= rw - 12 or by + bh >= rh - 12:
+        if bx <= 14 or by <= 14 or bx + bw >= rw - 14 or by + bh >= rh - 14:
             continue
         cx, cy = centroids[i]
         gx, gy = float(x0 + cx), float(y0 + cy)
@@ -228,7 +278,8 @@ def candidates_for_frame(frame: np.ndarray, frame_index: int, time_s: float, cli
             continue
         if is_forbidden_point(gx, gy, frame.shape):
             continue
-        out.append(Candidate(frame_index, time_s, gx, gy, area, float(quality)))
+        center_prior = -0.055 * abs(gx - 0.50 * frame.shape[1]) - 0.030 * abs(gy - 0.62 * frame.shape[0])
+        out.append(Candidate(frame_index, time_s, gx, gy, area, float(quality + center_prior)))
     out.sort(key=lambda c: c.quality, reverse=True)
     return out[:TOP_CANDIDATES_PER_FRAME]
 
@@ -238,7 +289,7 @@ def transition_score(prev: Candidate, cur: Candidate) -> float | None:
     gap = max(1, cur.frame_index - prev.frame_index)
     if dist > MAX_LINK_STEP_PX * gap:
         return None
-    return -2.0 * dist - 3.0 * max(0.0, dist - 90.0 * gap) - 10.0 * (gap - 1)
+    return -1.45 * dist - 2.1 * max(0.0, dist - 105.0 * gap) - 9.0 * (gap - 1)
 
 
 def best_candidate_path(groups: list[list[Candidate]]) -> list[Candidate]:
@@ -249,7 +300,7 @@ def best_candidate_path(groups: list[list[Candidate]]) -> list[Candidate]:
     for gi, group in enumerate(groups):
         gs, gp = [], []
         for cand in group:
-            best = cand.quality - 0.10 * abs(cand.x - 560.0) - 0.06 * abs(cand.y - 1320.0)
+            best = cand.quality
             parent = None
             for pgi in range(max(0, gi - 4), gi):
                 for pci, prev in enumerate(groups[pgi]):
@@ -304,7 +355,7 @@ def split_good_segments(path: list[Candidate], frame_shape, min_y: float) -> lis
 
 def segment_score(segment: list[Candidate]) -> float:
     pts = [(c.time_s, c.x, c.y, c.area) for c in segment]
-    return 14.0 * len(segment) + 0.10 * path_distance(pts) + 0.12 * lateral_span_px(pts) + 0.08 * straight_distance(pts)
+    return 16.0 * len(segment) + 0.10 * path_distance(pts) + 0.16 * lateral_span_px(pts) + 0.09 * straight_distance(pts)
 
 
 def clean_segment_points(segment: list[Candidate]) -> list[tuple[float, float, float, int]]:
@@ -314,7 +365,7 @@ def clean_segment_points(segment: list[Candidate]) -> list[tuple[float, float, f
     xy = xy_from_points(pts)
     out = []
     for i, p in enumerate(pts):
-        lo, hi = max(0, i - 1), min(len(pts), i + 2)
+        lo, hi = max(0, i - 2), min(len(pts), i + 3)
         mx, my = np.median(xy[lo:hi], axis=0)
         out.append((p[0], float(mx), float(my), p[3]))
     return out
@@ -341,11 +392,11 @@ def detect_points_robust(clip: ClipConfig, root: Path) -> tuple[list[tuple[float
     cap.release()
 
     if frame_shape is None or not groups:
-        return [], {"raw_candidate_count": raw_count, "candidate_frame_count": len(groups), "selected_segment_count": 0, "tracking_reason": "no candidates"}
+        return [], {"raw_candidate_count": raw_count, "candidate_frame_count": len(groups), "selected_segment_count": 0, "tracking_reason": "no body candidates"}
     path = best_candidate_path(groups)
     segs = split_good_segments(path, frame_shape, clip.min_y)
     if not segs:
-        return [], {"raw_candidate_count": raw_count, "candidate_frame_count": len(groups), "selected_segment_count": 0, "tracking_reason": "no good segment"}
+        return [], {"raw_candidate_count": raw_count, "candidate_frame_count": len(groups), "selected_segment_count": 0, "tracking_reason": "no good body segment"}
     best = max(segs, key=segment_score)
     pts = clean_segment_points(best)
     return pts, {
@@ -354,7 +405,7 @@ def detect_points_robust(clip: ClipConfig, root: Path) -> tuple[list[tuple[float
         "selected_path_count": len(path),
         "selected_segment_count": len(best),
         "dropped_segment_count": max(0, len(path) - len(best)),
-        "tracking_reason": "robust multi-candidate path selected",
+        "tracking_reason": "wide body-color multi-candidate path selected",
     }
 
 
@@ -365,9 +416,9 @@ def track_quality(points, video_path: Path, mode: str) -> dict:
     min_path = MIN_PROBE_PATH_PX if mode == "probe" else MIN_LINE_PATH_PX
     q = {"valid_track": True, "invalid_reason": None, "quality_point_count": pc, "quality_net_px": net, "quality_path_px": path, "quality_edge_fraction": 0.0, "quality_corner_like": False}
     if pc < min_points:
-        return {**q, "valid_track": False, "invalid_reason": f"too few {mode} points"}
+        return {**q, "valid_track": False, "invalid_reason": f"too few {mode} body points"}
     if net < min_net or path < min_path:
-        return {**q, "valid_track": False, "invalid_reason": f"{mode} track is too short"}
+        return {**q, "valid_track": False, "invalid_reason": f"{mode} body track is too short"}
 
     shape = first_frame_shape(video_path)
     if shape is None:
@@ -376,28 +427,14 @@ def track_quality(points, video_path: Path, mode: str) -> dict:
     xy = xy_from_points(points)
     medx, medy = float(np.median(xy[:, 0])), float(np.median(xy[:, 1]))
     bottom_left = medx < BOTTOM_LEFT_X_FRAC * w and medy > BOTTOM_Y_FRAC * h
-    edge = (xy[:, 0] < 0.12 * w) | (xy[:, 0] > RIGHT_EDGE_X_FRAC * w) | (xy[:, 1] < TOP_EDGE_Y_FRAC * h) | (xy[:, 1] > 0.78 * h)
+    edge = (xy[:, 0] < 0.12 * w) | (xy[:, 0] > RIGHT_EDGE_X_FRAC * w) | (xy[:, 1] < TOP_EDGE_Y_FRAC * h) | (xy[:, 1] > 0.80 * h)
     edge_fraction = float(np.mean(edge))
     q.update({"quality_median_x_px": medx, "quality_median_y_px": medy, "quality_frame_width_px": w, "quality_frame_height_px": h, "quality_edge_fraction": edge_fraction, "quality_corner_like": bool(bottom_left)})
     if bottom_left:
-        return {**q, "valid_track": False, "invalid_reason": f"{mode} track is concentrated in bottom-left overlay/corner"}
+        return {**q, "valid_track": False, "invalid_reason": f"{mode} track is concentrated in bottom-left corner/reflection"}
     if edge_fraction >= EDGE_FRACTION_LIMIT:
-        return {**q, "valid_track": False, "invalid_reason": f"too many {mode} points are on image edges"}
+        return {**q, "valid_track": False, "invalid_reason": f"too many {mode} points are on image edges/reflections"}
     return q
-
-
-def lateral_span_px(points) -> float:
-    xy = xy_from_points(points)
-    if len(xy) < 2:
-        return 0.0
-    return float(np.ptp(xy[:, 0]))
-
-
-def lateral_displacement_px(points) -> float:
-    xy = xy_from_points(points)
-    if len(xy) < 2:
-        return 0.0
-    return float(abs(xy[-1, 0] - xy[0, 0]))
 
 
 def heading_change_deg(points) -> float:
@@ -438,7 +475,7 @@ def choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit):
         evidence.append("lateral_disp")
     if rmse_over_r is not None and rmse_over_r <= MAX_TURN_RMSE_OVER_RADIUS:
         evidence.append("circle_fit")
-    if straightness <= MAX_TURN_STRAIGHTNESS and span >= 55.0:
+    if straightness <= MAX_TURN_STRAIGHTNESS and span >= 50.0:
         evidence.append("not_straight")
 
     auto = {
@@ -456,26 +493,26 @@ def choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit):
         "auto_fit_turn_evidence_score": len(evidence),
     }
 
-    strong_lateral_turn = span >= 110.0 or disp >= 95.0
+    strong_lateral_turn = span >= 95.0 or disp >= 80.0
     is_turn = net_px >= MIN_TURN_NET_PX and radius_px is not None and (strong_lateral_turn or len(evidence) >= MIN_TURN_SCORE)
     if is_turn:
-        circle_fit = {**circle_fit, **auto, "auto_fit_kind": "circle", "auto_fit_reason": f"turn evidence={','.join(evidence)}"}
+        circle_fit = {**circle_fit, **auto, "auto_fit_kind": "circle", "motion_class": "turn", "auto_fit_reason": f"turn evidence={','.join(evidence)}"}
         return circle_curve, circle_fit, "circle"
 
-    line_fit = {**line_fit, **auto, "auto_fit_kind": "line", "auto_fit_reason": f"not enough turn evidence={','.join(evidence)}"}
+    line_fit = {**line_fit, **auto, "auto_fit_kind": "line", "motion_class": "straight", "auto_fit_reason": f"not enough turn evidence={','.join(evidence)}"}
     return line_curve, line_fit, "line"
 
 
 def fit_points(points, requested_fit_kind: str):
     if len(points) < 2:
-        return None, {"status": "not_enough_points", "radius_px": None, "arc_deg": 0.0, "rmse_px": None}, requested_fit_kind
+        return None, {"status": "not_enough_points", "radius_px": None, "arc_deg": 0.0, "rmse_px": None, "motion_class": "invalid"}, requested_fit_kind
     xy = xy_from_points(points)
     if requested_fit_kind == "line" or len(points) < 3:
         curve, fit = fit_line(xy)
-        return curve, fit, "line"
+        return curve, {**fit, "motion_class": "straight"}, "line"
     if requested_fit_kind == "circle":
         curve, fit = fit_circle(xy)
-        return curve, fit, "circle"
+        return curve, {**fit, "motion_class": "turn"}, "circle"
     line_curve, line_fit = fit_line(xy)
     circle_curve, circle_fit = fit_circle(xy)
     return choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit)
@@ -516,7 +553,7 @@ def draw_invalid_preview(video_path: Path, seconds: float, out_path: Path, reaso
     cap.release()
     if not ok or frame is None:
         return
-    for i, line in enumerate(["Invalid track  REAL", f"Real: {point_count} pts", "speed invalid", "forward invalid", reason[:36]]):
+    for i, line in enumerate(["Invalid body track  REAL", f"Real: {point_count} pts", "speed invalid", "forward invalid", reason[:36]]):
         draw_text_outline(frame, line, (28, 48 + 32 * i), scale=0.78)
     cv2.imwrite(str(out_path), frame)
 
@@ -528,7 +565,7 @@ def annotate_preview(preview_path: Path, result: dict) -> None:
     if frame is None:
         return
     if result.get("fit_kind") == "invalid_track":
-        lines = ["Invalid track  REAL", f"Real: {result.get('point_count', 0)} pts", "speed invalid", "forward invalid", str(result.get("invalid_reason", "check tracking"))[:36]]
+        lines = ["Invalid body track  REAL", f"Real: {result.get('point_count', 0)} pts", "speed invalid", "forward invalid", str(result.get("invalid_reason", "check tracking"))[:36]]
     elif result.get("fit_kind") == "line":
         speed = result.get("forward_speed_m_s")
         lines = ["Straight swim  REAL", f"Real: {result.get('point_count', 0)} pts", f"speed {'nan' if speed is None else f'{speed:.3f} m/s'}", f"forward {result.get('forward_distance_m', result.get('straight_distance_m', 0.0)):.3f} m", f"line RMSE {result.get('rmse_px', 0.0):.1f}px"]
@@ -550,7 +587,7 @@ def process_video(video_path: Path, out_root: Path, output_name: str = DEFAULT_O
     clip = probe_clip
     points = probe_points
     curve = None
-    fit = {"kind": "invalid_track", "status": "not_fit", "rmse_px": None}
+    fit = {"kind": "invalid_track", "status": "not_fit", "rmse_px": None, "motion_class": "invalid"}
     selected_fit_kind = "invalid_track"
     measurement_mode = "invalid_probe"
     final_quality = probe_quality
@@ -593,14 +630,16 @@ def process_video(video_path: Path, out_root: Path, output_name: str = DEFAULT_O
     elif write_preview and selected_fit_kind == "invalid_track":
         draw_invalid_preview(video_path, clip.wall_seconds, preview_path, str(final_quality.get("invalid_reason") or "invalid track"), len(points))
 
+    motion_class = "turn" if selected_fit_kind == "circle" else "straight" if selected_fit_kind == "line" else "invalid"
     result = {
-        "tracker_version": "robust_multi_candidate_v2_lateral_turn_wide_color",
+        "tracker_version": "robust_body_tracker_v3_widest_color_no_corner_glare",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
         "clip_key": clip.key,
         "requested_fit_kind": "robust_probe_then_measure",
         "fit_kind": selected_fit_kind,
+        "motion_class": motion_class,
         "measurement_mode": measurement_mode,
         "valid_track": bool(final_quality.get("valid_track", True)),
         "invalid_reason": final_quality.get("invalid_reason"),
