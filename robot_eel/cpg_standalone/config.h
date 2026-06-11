@@ -8,6 +8,9 @@
 
 #define bodyNum 6
 
+// =====================================================
+// CPG oscillator
+// =====================================================
 struct HopfOscillator {
   float r;
   float theta;
@@ -15,38 +18,19 @@ struct HopfOscillator {
   float mu;
 };
 
-// ==========================
-// Python HopfCPGParams mapping
-// ==========================
-extern float frequency;
-extern float wavelength;
-extern float bodyLength;
-
-// Python uses radians internally for ajoint and output.
-extern float ajointRad;
-extern float alphaHopf;
-extern float muBase;
-
-extern float kCouple;
-extern float kAnchor;
-extern float kFbPhase;
-extern float kFbAmp;
-
-extern float fbPhase;
-extern float fbAmp;
-
-// ==========================
-// Optional parameter arrays
-// ==========================
-extern bool useAmpScales;
-extern bool usePhaseLags;
-extern bool useJointBiasDeg;
-
+// =====================================================
+// CPG control parameters
+// Same naming and units as robot_eel/control/config.h.
+// =====================================================
+extern float Ajoint;                 // degree
+extern float frequency;              // Hz
+extern float lambda;
+extern float L;
 extern float ampScales[bodyNum];
-extern float phaseLags[bodyNum - 1];
-extern float jointBiasDeg[bodyNum];
+extern float phaseLags[bodyNum - 1]; // rad
+extern float jointBiasDeg[bodyNum];  // degree
 
-// ==========================
+// =====================================================
 // CPG state
-// ==========================
+// =====================================================
 extern HopfOscillator cpg[bodyNum];
