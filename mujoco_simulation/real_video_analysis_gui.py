@@ -15,12 +15,8 @@ import numpy as np
 from make_tracked_center_cleaned_physical import (
     DEFAULT_PREVIEW_NAME,
     DEFAULT_PX_PER_M,
-    DEFAULT_RECORDINGS_DIR,
-    DEFAULT_VIDEO_STEMS,
     process_video,
     resolve_path,
-    resolve_recordings_dir,
-    resolve_video,
 )
 from plot_fixed_gait_trajectories import draw_environment, plot_one, run_gait, summarize
 from plot_fitted_gait_curves import (
@@ -59,7 +55,6 @@ class RealVideoAnalysisApp:
         self.root.title("Robot Eel Real + MuJoCo Gait Pipeline")
         self.root.geometry("980x700")
 
-        self.recordings_var = tk.StringVar(value=str(DEFAULT_RECORDINGS_DIR))
         self.video_var = tk.StringVar()
         self.gait_json_var = tk.StringVar()
         self.out_var = tk.StringVar(value=str(DEFAULT_PIPELINE_ROOT))
@@ -72,23 +67,17 @@ class RealVideoAnalysisApp:
         outer = ttk.Frame(self.root, padding=12)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        rec_row = ttk.Frame(outer)
-        rec_row.pack(fill=tk.X, pady=4)
-        ttk.Label(rec_row, text="Recordings folder").pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Entry(rec_row, textvariable=self.recordings_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(rec_row, text="Browse", command=self.browse_recordings).pack(side=tk.LEFT, padx=(8, 0))
-
         file_row = ttk.Frame(outer)
         file_row.pack(fill=tk.X, pady=4)
-        ttk.Label(file_row, text="Single MP4").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(file_row, text="MP4 file(s)").pack(side=tk.LEFT, padx=(0, 8))
         ttk.Entry(file_row, textvariable=self.video_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(file_row, text="Browse", command=self.browse_video).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(file_row, text="Browse", command=self.browse_videos).pack(side=tk.LEFT, padx=(8, 0))
 
         json_row = ttk.Frame(outer)
         json_row.pack(fill=tk.X, pady=4)
-        ttk.Label(json_row, text="Gait JSON").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(json_row, text="Gait JSON file(s)").pack(side=tk.LEFT, padx=(0, 8))
         ttk.Entry(json_row, textvariable=self.gait_json_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(json_row, text="Browse", command=self.browse_gait_json).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(json_row, text="Browse", command=self.browse_gait_jsons).pack(side=tk.LEFT, padx=(8, 0))
 
         out_row = ttk.Frame(outer)
         out_row.pack(fill=tk.X, pady=4)
@@ -103,67 +92,69 @@ class RealVideoAnalysisApp:
         ttk.Checkbutton(options, text=f"Write real preview PNG ({DEFAULT_PREVIEW_NAME})", variable=self.preview_var).grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
         ttk.Label(
             options,
-            text="Output is separated under the selected root folder: real_video_analysis, fixed_gait_trajectories_3x1_5, fitted_curve_comparison.",
+            text="Use Browse to multi-select MP4 videos and/or gait JSON files. No default videos or default gaits are run.",
         ).grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
         ttk.Label(
             options,
-            text="Select MP4 for real tracking, or select Gait JSON to run MuJoCo and generate the same trajectory/fitted-R analysis figures.",
+            text="Selected MP4s go to real_video_analysis. Selected JSON gaits go to MuJoCo, trajectory CSV, trajectory PNG, fitted-R PNG, and fitted summary JSON.",
         ).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
 
         button_row = ttk.Frame(outer)
         button_row.pack(fill=tk.X, pady=8)
-        self.single_button = ttk.Button(button_row, text="Analyze selected MP4", command=self.start_single)
-        self.single_button.pack(side=tk.LEFT)
-        self.json_button = ttk.Button(button_row, text="Analyze selected JSON", command=self.start_json)
+        self.mp4_button = ttk.Button(button_row, text="Analyze selected MP4(s)", command=self.start_mp4s)
+        self.mp4_button.pack(side=tk.LEFT)
+        self.json_button = ttk.Button(button_row, text="Analyze selected JSON gait(s)", command=self.start_jsons)
         self.json_button.pack(side=tk.LEFT, padx=6)
-        self.real3_button = ttk.Button(button_row, text="Analyze real 3 videos", command=self.start_real3)
-        self.real3_button.pack(side=tk.LEFT, padx=6)
-        self.sim_button = ttk.Button(button_row, text="Run MuJoCo fixed gait", command=self.start_sim)
-        self.sim_button.pack(side=tk.LEFT, padx=6)
-        self.curve_button = ttk.Button(button_row, text="Plot fitted curves", command=self.start_curves)
+        self.selected_pipeline_button = ttk.Button(button_row, text="Run selected MP4(s) + JSON gait(s)", command=self.start_selected_pipeline)
+        self.selected_pipeline_button.pack(side=tk.LEFT, padx=6)
+        self.curve_button = ttk.Button(button_row, text="Plot fitted curves from current outputs", command=self.start_curves)
         self.curve_button.pack(side=tk.LEFT, padx=6)
-        self.full_button = ttk.Button(button_row, text="Run full pipeline", command=self.start_full)
-        self.full_button.pack(side=tk.LEFT, padx=6)
         ttk.Button(button_row, text="Open output root", command=self.open_output_folder).pack(side=tk.LEFT, padx=6)
 
         self.log = tk.Text(outer, height=24, wrap=tk.WORD)
         self.log.pack(fill=tk.BOTH, expand=True)
         self.logger = TextLogger(self.log)
-        self.logger.write("Robot eel gait pipeline GUI ready.\n")
-        self.logger.write("Default 3 real videos:\n")
-        for stem in DEFAULT_VIDEO_STEMS:
-            self.logger.write(f"  - {stem}.mp4\n")
+        self.logger.write("Robot eel selected-file pipeline GUI ready.\n")
+        self.logger.write("No default videos or default gaits will run. Use Browse to choose MP4 and/or JSON files.\n")
         self.logger.write("\nPipeline folders under output root:\n")
         self.logger.write(f"  {REAL_SUBDIR}/\n")
         self.logger.write(f"  {SIM_SUBDIR}/\n")
         self.logger.write(f"  {FIT_SUBDIR}/\n")
-        self.logger.write("\nUse Gait JSON + Analyze selected JSON to run a new RL gait through MuJoCo and fitted-R analysis.\n")
 
-    def browse_recordings(self) -> None:
-        dirname = filedialog.askdirectory(title="Select recordings folder")
-        if dirname:
-            self.recordings_var.set(dirname)
+    @staticmethod
+    def _join_paths(paths: tuple[str, ...] | list[str]) -> str:
+        return "; ".join(str(path) for path in paths)
 
-    def browse_video(self) -> None:
-        filename = filedialog.askopenfilename(
-            title="Select MP4 video",
+    @staticmethod
+    def _paths_from_var(value: str) -> list[Path]:
+        return [Path(part.strip()).expanduser() for part in value.split(";") if part.strip()]
+
+    def browse_videos(self) -> None:
+        filenames = filedialog.askopenfilenames(
+            title="Select MP4 video file(s)",
             filetypes=(("MP4 files", "*.mp4"), ("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")),
         )
-        if filename:
-            self.video_var.set(filename)
+        if filenames:
+            self.video_var.set(self._join_paths(list(filenames)))
 
-    def browse_gait_json(self) -> None:
-        filename = filedialog.askopenfilename(
-            title="Select gait JSON",
+    def browse_gait_jsons(self) -> None:
+        filenames = filedialog.askopenfilenames(
+            title="Select gait JSON file(s)",
             filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
         )
-        if filename:
-            self.gait_json_var.set(filename)
+        if filenames:
+            self.gait_json_var.set(self._join_paths(list(filenames)))
 
     def browse_output(self) -> None:
         dirname = filedialog.askdirectory(title="Select pipeline output root")
         if dirname:
             self.out_var.set(dirname)
+
+    def selected_videos(self) -> list[Path]:
+        return self._paths_from_var(self.video_var.get())
+
+    def selected_gait_jsons(self) -> list[Path]:
+        return self._paths_from_var(self.gait_json_var.get())
 
     def output_root(self) -> Path:
         return resolve_path(Path(self.out_var.get()).expanduser())
@@ -177,9 +168,6 @@ class RealVideoAnalysisApp:
     def fit_out_dir(self) -> Path:
         return self.output_root() / FIT_SUBDIR
 
-    def recordings_dir(self) -> Path:
-        return resolve_recordings_dir(Path(self.recordings_var.get()).expanduser())
-
     def open_output_folder(self) -> None:
         path = self.output_root()
         path.mkdir(parents=True, exist_ok=True)
@@ -192,38 +180,33 @@ class RealVideoAnalysisApp:
 
     def set_buttons(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
-        for button in (self.single_button, self.json_button, self.real3_button, self.sim_button, self.curve_button, self.full_button):
+        for button in (self.mp4_button, self.json_button, self.selected_pipeline_button, self.curve_button):
             button.configure(state=state)
 
-    def start_single(self) -> None:
-        video = self.video_var.get().strip()
-        if not video:
-            messagebox.showerror("Missing MP4", "Please select one MP4 file first.")
+    def start_mp4s(self) -> None:
+        videos = self.selected_videos()
+        if not videos:
+            messagebox.showerror("Missing MP4", "Please select one or more MP4 files first.")
             return
-        self._start_thread(self._run_real_videos, [Path(video)])
-
-    def start_json(self) -> None:
-        gait_json = self.gait_json_var.get().strip()
-        if not gait_json:
-            messagebox.showerror("Missing JSON", "Please select one gait JSON file first.")
-            return
-        self._start_thread(self._run_json_gait, Path(gait_json))
-
-    def start_real3(self) -> None:
-        recordings_dir = self.recordings_dir()
-        videos = [resolve_video(f"{stem}.mp4", recordings_dir) for stem in DEFAULT_VIDEO_STEMS]
         self._start_thread(self._run_real_videos, videos)
 
-    def start_sim(self) -> None:
-        self._start_thread(self._run_simulation)
+    def start_jsons(self) -> None:
+        gait_jsons = self.selected_gait_jsons()
+        if not gait_jsons:
+            messagebox.showerror("Missing JSON", "Please select one or more gait JSON files first.")
+            return
+        self._start_thread(self._run_json_gaits, gait_jsons)
+
+    def start_selected_pipeline(self) -> None:
+        videos = self.selected_videos()
+        gait_jsons = self.selected_gait_jsons()
+        if not videos and not gait_jsons:
+            messagebox.showerror("Missing input", "Please select MP4 files and/or gait JSON files first.")
+            return
+        self._start_thread(self._run_selected_pipeline, videos, gait_jsons)
 
     def start_curves(self) -> None:
         self._start_thread(self._run_fitted_curves)
-
-    def start_full(self) -> None:
-        recordings_dir = self.recordings_dir()
-        videos = [resolve_video(f"{stem}.mp4", recordings_dir) for stem in DEFAULT_VIDEO_STEMS]
-        self._start_thread(self._run_full_pipeline, videos)
 
     def _start_thread(self, func, *args) -> None:
         self.set_buttons(False)
@@ -244,6 +227,21 @@ class RealVideoAnalysisApp:
     def _safe_name(value: str) -> str:
         safe = "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in value.strip())
         return safe.strip("._") or "selected_gait"
+
+    @staticmethod
+    def _unique_name(base_name: str, used_names: set[str], sim_out: Path, fit_out: Path) -> str:
+        base_name = RealVideoAnalysisApp._safe_name(base_name)
+        name = base_name
+        idx = 2
+        while (
+            name in used_names
+            or (sim_out / f"{name}_trajectory.csv").exists()
+            or (fit_out / f"{name}_fitted_summary.json").exists()
+        ):
+            name = f"{base_name}_{idx}"
+            idx += 1
+        used_names.add(name)
+        return name
 
     @staticmethod
     def _json_ready(value):
@@ -301,26 +299,38 @@ class RealVideoAnalysisApp:
 
         return {"name": name, **fit, **metrics}
 
-    def _run_json_gait(self, gait_path: Path) -> None:
-        gait_path = gait_path.expanduser().resolve()
-        if not gait_path.exists():
-            raise FileNotFoundError(f"Gait JSON not found: {gait_path}")
-
+    def _run_json_gaits(self, gait_paths: list[Path]) -> None:
         sim_out = self.sim_out_dir()
         fit_out = self.fit_out_dir()
         sim_out.mkdir(parents=True, exist_ok=True)
         fit_out.mkdir(parents=True, exist_ok=True)
 
-        self.logger.write("\n=== MuJoCo selected JSON gait ===\n")
-        self.logger.write(f"gait_json={gait_path}\n")
+        self.logger.write("\n=== MuJoCo selected JSON gait(s) ===\n")
+        self.logger.write(f"count={len(gait_paths)}\n")
         self.logger.write(f"sim_out={sim_out}\n")
         self.logger.write(f"fit_out={fit_out}\n")
 
+        used_names: set[str] = set()
+        rows = []
+        for gait_path in gait_paths:
+            row = self._run_one_json_gait(gait_path, used_names, sim_out, fit_out)
+            rows.append(row)
+
+        combined_path = fit_out / "selected_json_gaits_summary.json"
+        combined_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        self.logger.write(f"\nSelected JSON gait summary: {combined_path}\n")
+
+    def _run_one_json_gait(self, gait_path: Path, used_names: set[str], sim_out: Path, fit_out: Path) -> dict:
+        gait_path = gait_path.expanduser().resolve()
+        if not gait_path.exists():
+            raise FileNotFoundError(f"Gait JSON not found: {gait_path}")
+
+        self.logger.write(f"\nGait JSON: {gait_path}\n")
         gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, seconds=30.0, start_x=DEFAULT_START_X, start_y=DEFAULT_START_Y)
         if arr.size == 0:
             raise RuntimeError(f"No MuJoCo trajectory was produced for {gait_path}")
 
-        name = self._safe_name(str(gait.get("name", gait_path.stem)))
+        name = self._unique_name(str(gait.get("name", gait_path.stem)), used_names, sim_out, fit_out)
         csv_path = sim_out / f"{name}_trajectory.csv"
         np.savetxt(csv_path, arr, delimiter=",", header="time,x,y,yaw", comments="")
 
@@ -347,6 +357,7 @@ class RealVideoAnalysisApp:
                 "source_gait_json": str(gait_path),
                 "trajectory_csv": str(csv_path),
                 "trajectory_png": str(trajectory_png),
+                "trajectory_summary_json": str(fixed_summary_path),
                 "fit_png": str(fitted_png),
                 "hit_wall": bool(hit_wall),
             }
@@ -365,6 +376,7 @@ class RealVideoAnalysisApp:
             f"  R={radius_text}, arc={float(fitted_summary.get('arc_deg') or 0.0):.3f}deg, "
             f"rmse={float(fitted_summary.get('rmse') or 0.0):.4f}m\n"
         )
+        return fitted_summary
 
     def _run_real_videos(self, videos: list[Path]) -> None:
         out_root = self.real_out_dir()
@@ -373,6 +385,7 @@ class RealVideoAnalysisApp:
         write_preview = bool(self.preview_var.get())
 
         self.logger.write("\n=== Real video tracking ===\n")
+        self.logger.write(f"count={len(videos)}\n")
         self.logger.write(f"out_root={out_root}\n")
         self.logger.write(f"px_per_m={px_per_m:.6f}\n")
 
@@ -387,11 +400,17 @@ class RealVideoAnalysisApp:
             result = json.loads(summary_path.read_text(encoding="utf-8"))
             self._log_real_result(result, summary_path)
 
-    def _run_simulation(self) -> None:
-        sim_out = self.sim_out_dir()
-        sim_out.mkdir(parents=True, exist_ok=True)
-        self.logger.write("\n=== MuJoCo fixed gait trajectories ===\n")
-        self._run_command([sys.executable, "plot_fixed_gait_trajectories.py", "--out-dir", str(sim_out)])
+    def _run_selected_pipeline(self, videos: list[Path], gait_jsons: list[Path]) -> None:
+        self.logger.write("\n=== Selected file pipeline ===\n")
+        if videos:
+            self._run_real_videos(videos)
+        else:
+            self.logger.write("No MP4 files selected; skipping real video tracking.\n")
+
+        if gait_jsons:
+            self._run_json_gaits(gait_jsons)
+        else:
+            self.logger.write("No gait JSON files selected; skipping MuJoCo JSON gait analysis.\n")
 
     def _run_fitted_curves(self) -> None:
         real_out = self.real_out_dir()
@@ -408,17 +427,11 @@ class RealVideoAnalysisApp:
                 "--video-analysis-dir",
                 str(real_out),
                 "--recordings-dir",
-                str(self.recordings_dir()),
+                str(real_out),
                 "--out-dir",
                 str(fit_out),
             ]
         )
-
-    def _run_full_pipeline(self, videos: list[Path]) -> None:
-        self.logger.write("\n=== Full pipeline ===\n")
-        self._run_real_videos(videos)
-        self._run_simulation()
-        self._run_fitted_curves()
 
     def _run_command(self, cmd: list[str]) -> None:
         self.logger.write("CMD: " + " ".join(cmd) + "\n")
