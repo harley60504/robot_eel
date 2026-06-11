@@ -4,10 +4,12 @@ import argparse
 from pathlib import Path
 
 from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.monitor import Monitor
 
 from hopf_cpg import degrees_to_radians
 from rl_free_swim_env import EelFreeSwimRLEnv, FreeSwimConfig
+from rl_training_plots import default_eval_log_dir, default_plot_path, try_plot_eval_curve
 
 
 def parse_float_list(value: str, expected_len: int, name: str) -> tuple[float, ...]:
@@ -37,6 +39,11 @@ def parse_args():
     parser.add_argument("--yaw-rate-weight", type=float, default=None)
     parser.add_argument("--energy-weight", type=float, default=None)
     parser.add_argument("--smoothness-weight", type=float, default=None)
+    parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluate every N training steps. Use 0 to disable.")
+    parser.add_argument("--eval-episodes", type=int, default=5, help="Episodes per evaluation.")
+    parser.add_argument("--eval-log-dir", type=Path, default=None, help="Directory for evaluations.npz.")
+    parser.add_argument("--plot-output", type=Path, default=None, help="PNG path for eval reward curve.")
+    parser.add_argument("--no-plot", action="store_true", help="Do not create a PNG/CSV plot after training.")
     return parser.parse_args()
 
 
@@ -75,10 +82,31 @@ def config_from_args(args) -> FreeSwimConfig:
     return cfg
 
 
+def make_eval_callback(args, cfg: FreeSwimConfig) -> tuple[EvalCallback | None, Path | None, Path | None]:
+    if args.eval_freq <= 0:
+        return None, None, None
+    eval_log_dir = args.eval_log_dir or default_eval_log_dir(args.output)
+    plot_output = args.plot_output or default_plot_path(args.output)
+    eval_log_dir.mkdir(parents=True, exist_ok=True)
+    eval_env = Monitor(EelFreeSwimRLEnv(cfg))
+    callback = EvalCallback(
+        eval_env,
+        best_model_save_path=str(eval_log_dir / "best_model"),
+        log_path=str(eval_log_dir),
+        eval_freq=args.eval_freq,
+        n_eval_episodes=args.eval_episodes,
+        deterministic=True,
+        render=False,
+    )
+    return callback, eval_log_dir, plot_output
+
+
 def main():
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    env = Monitor(EelFreeSwimRLEnv(config_from_args(args)))
+    cfg = config_from_args(args)
+    env = Monitor(EelFreeSwimRLEnv(cfg))
+    callback, eval_log_dir, plot_output = make_eval_callback(args, cfg)
     if args.load_model is None:
         model = PPO(
             "MlpPolicy",
@@ -95,9 +123,11 @@ def main():
         model = PPO.load(args.load_model, env=env)
         model.verbose = 1
         reset_num_timesteps = False
-    model.learn(total_timesteps=args.timesteps, reset_num_timesteps=reset_num_timesteps)
+    model.learn(total_timesteps=args.timesteps, reset_num_timesteps=reset_num_timesteps, callback=callback)
     model.save(args.output)
     print(f"saved policy to {args.output}.zip")
+    if callback is not None and eval_log_dir is not None and plot_output is not None and not args.no_plot:
+        try_plot_eval_curve(eval_log_dir, plot_output, label=args.output.name)
 
 
 if __name__ == "__main__":
