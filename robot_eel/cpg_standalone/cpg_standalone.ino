@@ -3,34 +3,14 @@
 #include "cpg.h"
 
 // ==========================
-// Python HopfCPGParams
+// Control Parameters
+// Same naming and units as robot_eel/control/control.ino.
 // ==========================
-float frequency  = 1.0f;
-float wavelength = 1.6275f;
-float bodyLength = 1.0f;
-
-// Python ajoint is radians.
-float ajointRad = 15.0f * ((float)M_PI / 180.0f);
-
-float alphaHopf = 4.0f;
-float muBase    = 1.0f;
-
-float kCouple  = 0.35f;
-float kAnchor  = 0.10f;
-float kFbPhase = 0.8f;
-float kFbAmp   = 0.25f;
-
-float fbPhase = 0.0f;
-float fbAmp   = 0.0f;
-
-// ==========================
-// Optional arrays
-// ==========================
-bool useAmpScales    = true;
-bool usePhaseLags    = true;
-bool useJointBiasDeg = true;
-
-// RL exported params: rl_straight
+// RL exported params: mujoco_simulation/gaits/rl_straight.json
+float Ajoint       = 15.0f;  // deg
+float frequency    = 1.0f;
+float lambda       = 1.6275f;
+float L            = 1.0f;
 float ampScales[bodyNum] = {
   1.1f,
   0.95f,
@@ -39,7 +19,6 @@ float ampScales[bodyNum] = {
   1.161346f,
   1.273484f
 };
-
 float phaseLags[bodyNum - 1] = {
   0.614385f,
   0.622822f,
@@ -47,21 +26,12 @@ float phaseLags[bodyNum - 1] = {
   0.615359f,
   0.608868f
 };
-
-// Stored in degrees and converted to radians by getCPGOutputRad().
-float jointBiasDeg[bodyNum] = {
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f,
-  0.0f
-};
+float jointBiasDeg[bodyNum] = {0, 0, 0, 0, 0, 0};
 
 HopfOscillator cpg[bodyNum];
 
 // ==========================
-// Timing
+// Standalone CPG test timing
 // ==========================
 const unsigned long intervalMs = 20;  // 50 Hz
 unsigned long lastUpdateMs = 0;
@@ -70,7 +40,7 @@ void setup() {
   Serial.begin(115200);
   delay(500);
 
-  resetCPG();
+  initCPG();
   lastUpdateMs = millis();
 
   // Arduino Serial Plotter labels.
@@ -86,11 +56,11 @@ void loop() {
 
     float t = now / 1000.0f;
 
-    updateCPGAll(t, dt);
+    // No sensor feedback in standalone test.
+    updateCPGAll(t, dt, 0.0f, 0.0f);
 
-    // Print degrees for easier Serial Plotter inspection.
     for (int j = 0; j < bodyNum; j++) {
-      float outDeg = getCPGOutputDeg(j);
+      float outDeg = getCPGOutput(j);
 
       Serial.print(outDeg, 4);
 
