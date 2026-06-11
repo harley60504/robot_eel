@@ -311,13 +311,22 @@ def draw_metric_box(frame, lines: list[str], font_scale: float = 0.9) -> None:
         y = baseline_y + line_gap
 
 
+def motion_kind_from_summary(data: dict, fallback: str) -> str:
+    motion_class = str(data.get("motion_class") or data.get("auto_fit_kind") or data.get("fit_kind") or "").lower()
+    if motion_class in {"straight", "line"}:
+        return "straight"
+    if motion_class in {"turn", "circle"}:
+        return "turn"
+    return fallback
+
+
 def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str, summary_path: Path):
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
     cap.release()
     if not ok:
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-    cv2.putText(frame, f"{label}: no tracked points", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
+    cv2.putText(frame, f"{label}: no tracked body points", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
     stem = video_path.stem
     out_img = out_dir / f"video_{stem}_no_points.png"
     out_json = out_dir / f"video_{stem}_no_points_summary.json"
@@ -327,7 +336,7 @@ def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str,
         "video": str(video_path),
         "summary": str(summary_path),
         "point_count": 0,
-        "status": "no tracked points",
+        "status": "no tracked body points",
         "straight_distance_px": 0.0,
         "path_distance_px": 0.0,
     }
@@ -337,30 +346,48 @@ def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str,
 
 
 def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label: str, kind: str):
+    summary_data = safe_read_summary(summary_path)
+    kind = motion_kind_from_summary(summary_data, kind)
     points = points_from_summary(summary_path)
     if points.shape[0] < 2:
         return draw_no_points_frame(video_path, out_dir, label, kind, summary_path)
     xy = points[:, 1:3]
     distance_metrics = point_distance_metrics(points)
-    summary_data = safe_read_summary(summary_path)
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
     cap.release()
     if not ok:
         raise RuntimeError(f"Could not read {video_path}")
     stem = video_path.stem
-    summary = {"label": label, "kind": kind, "video": str(video_path), "summary": str(summary_path), **distance_metrics}
+    summary = {
+        "label": label,
+        "kind": kind,
+        "motion_class": kind,
+        "video": str(video_path),
+        "summary": str(summary_path),
+        "tracker_version": summary_data.get("tracker_version"),
+        **distance_metrics,
+    }
     poly = np.round(xy).astype(np.int32)
     if kind == "turn":
-        curve, fit = fitted_curve(xy, count=260, force_circle=True)
+        radius_px = summary_data.get("radius_px")
+        arc_deg = summary_data.get("arc_deg")
+        rmse_px = summary_data.get("rmse_px")
+        if radius_px is not None and arc_deg is not None and rmse_px is not None:
+            curve, fit = fitted_curve(xy, count=260, force_circle=True)
+            fit.update({"radius": float(radius_px), "arc_deg": float(arc_deg), "rmse": float(rmse_px)})
+        else:
+            curve, fit = fitted_curve(xy, count=260, force_circle=True)
         curve_i = np.round(curve).astype(np.int32)
         cv2.polylines(frame, [curve_i], False, (0, 0, 255), 6, cv2.LINE_AA)
         cv2.polylines(frame, [poly], False, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.circle(frame, tuple(poly[0]), 9, (0, 255, 0), -1, cv2.LINE_AA)
         cv2.circle(frame, tuple(poly[-1]), 9, (0, 0, 255), -1, cv2.LINE_AA)
-        radius_m = None if fit["radius"] is None else float(fit["radius"]) / PX_PER_M
+        radius_m = summary_data.get("radius_m")
+        if radius_m is None and fit["radius"] is not None:
+            radius_m = float(fit["radius"]) / PX_PER_M
         speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
-        summary.update({"fit_kind": fit["kind"], "radius_px": fit["radius"], "radius_m": radius_m, "rmse_px": fit["rmse"], "rmse_m": fit["rmse"] / PX_PER_M, "arc_deg": fit["arc_deg"], "speed_m_s": speed_m_s})
+        summary.update({"fit_kind": "circle", "radius_px": fit["radius"], "radius_m": radius_m, "rmse_px": fit["rmse"], "rmse_m": fit["rmse"] / PX_PER_M, "arc_deg": fit["arc_deg"], "speed_m_s": speed_m_s})
         radius_text = "nan" if radius_m is None else f"{radius_m:.3f} m"
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
         draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"arc = {fit['arc_deg']:.1f} deg", f"RMSE = {fit['rmse']:.1f}px"])
@@ -379,7 +406,8 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
             forward_m = distance_metrics["straight_distance_px"] / PX_PER_M
         summary.update({"fit_kind": "line", "radius_m": None, "forward_distance_m": float(forward_m), "forward_speed_m_s": speed_m_s, "rmse_px": summary_data.get("rmse_px")})
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {summary_data.get('rmse_px', 0.0):.1f}px"])
+        rmse_value = summary_data.get("rmse_px", 0.0) or 0.0
+        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {rmse_value:.1f}px"])
         out_img = out_dir / f"video_{stem}_straight_distance.png"
         out_json = out_dir / f"video_{stem}_straight_distance_summary.json"
     cv2.imwrite(str(out_img), frame)
@@ -398,8 +426,7 @@ def dynamic_real_configs(video_analysis_dir: Path, recordings_dir: Path):
         if not video_path.exists():
             fallback = recordings_dir / f"{stem}.mp4"
             video_path = fallback if fallback.exists() else video_path
-        motion_class = str(data.get("motion_class") or data.get("fit_kind") or "").lower()
-        kind = "straight" if motion_class in {"line", "straight"} else "turn"
+        kind = motion_kind_from_summary(data, "turn")
         configs.append({"stem": stem, "label": stem, "kind": kind, "summary_path": summary_path, "video_path": video_path})
     return configs
 
@@ -425,10 +452,10 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
         out_img, summary = draw_real_result(video_path, summary_path, out_dir, label, kind)
         rows.append(summary)
         print(out_img)
-        if summary.get("status") == "no tracked points":
-            print(f"{label}: no tracked points; check marker color / threshold / video file")
+        if summary.get("status") == "no tracked body points":
+            print(f"{label}: no tracked body points; check body mask / threshold / video file")
             continue
-        if kind == "turn":
+        if summary.get("kind") == "turn":
             radius = "nan" if summary.get("radius_m") is None else f"{summary['radius_m']:.3f}m"
             speed = "nan" if summary.get("speed_m_s") is None else f"{summary['speed_m_s']:.3f}m/s"
             print(f"{label}: radius={radius} speed={speed} arc={summary.get('arc_deg', 0.0):.1f}deg rmse={summary.get('rmse_px', 0.0):.3f}px points={summary['point_count']}")
