@@ -10,7 +10,33 @@ from tkinter import messagebox, ttk
 
 
 ROOT = Path(__file__).resolve().parent
-GAIT_DIR = ROOT / "gaits"
+GAIT_DIRS = (
+    ROOT / "gaits",
+    ROOT / "outputs" / "rl_gaits",
+)
+REQUIRED_GAIT_FIELDS = ("ajoint", "freq", "wavelength", "amp_scales", "phase_lags", "joint_bias")
+
+
+def gait_source_label(path: Path, data: dict) -> str:
+    source = data.get("source")
+    if isinstance(source, dict):
+        source_type = str(source.get("type", "")).lower()
+        if "turning" in source_type:
+            return "RL turning"
+        if "ppo" in source_type or path.stem.startswith("rl_"):
+            return "RL"
+    if path.stem.startswith("rl_turn"):
+        return "RL turning"
+    if path.stem.startswith("rl_"):
+        return "RL"
+    return "preset"
+
+
+def gait_sort_key(item: dict) -> tuple[int, str, str]:
+    path = item["file"]
+    label = item["source_label"]
+    priority = 0 if label.startswith("RL") else 1
+    return (priority, path.stem.lower(), str(path).lower())
 
 
 class GaitGui(tk.Tk):
@@ -41,18 +67,43 @@ class GaitGui(tk.Tk):
         self.after(100, self.poll_output)
 
     def load_gaits(self) -> list[dict]:
-        if not GAIT_DIR.exists():
-            return []
-
         gaits = []
-        for path in sorted(GAIT_DIR.glob("*.json")):
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, json.JSONDecodeError):
+        seen_paths: set[Path] = set()
+        for gait_dir in GAIT_DIRS:
+            if not gait_dir.exists():
                 continue
-            gaits.append({"file": path, "data": data})
-        return gaits
+            for path in sorted(gait_dir.glob("*.json")):
+                resolved = path.resolve()
+                if resolved in seen_paths:
+                    continue
+                seen_paths.add(resolved)
+                try:
+                    with path.open("r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except (OSError, json.JSONDecodeError):
+                    continue
+                missing = [key for key in REQUIRED_GAIT_FIELDS if key not in data]
+                if missing:
+                    continue
+                source_label = gait_source_label(path, data)
+                try:
+                    relative = path.relative_to(ROOT)
+                except ValueError:
+                    relative = path
+                gaits.append(
+                    {
+                        "file": path,
+                        "relative": relative,
+                        "data": data,
+                        "source_label": source_label,
+                    }
+                )
+        return sorted(gaits, key=gait_sort_key)
+
+    def gait_display_text(self, gait: dict) -> str:
+        data = gait["data"]
+        name = data.get("name", gait["file"].stem)
+        return f"[{gait['source_label']}] {name}  ({gait['relative']})"
 
     def create_widgets(self):
         outer = ttk.Frame(self, padding=16)
@@ -131,11 +182,16 @@ class GaitGui(tk.Tk):
         left = ttk.LabelFrame(body, text="Fixed Gaits", padding=10)
         left.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
+        ttk.Label(
+            left,
+            text="Reads: gaits/*.json and outputs/rl_gaits/*.json. RL gaits are listed first.",
+            foreground="#555555",
+        ).pack(anchor=tk.W, pady=(0, 6))
+
         self.listbox = tk.Listbox(left, height=10, exportselection=False)
         self.listbox.pack(fill=tk.BOTH, expand=True)
         for gait in self.gaits:
-            name = gait["data"].get("name", gait["file"].stem)
-            self.listbox.insert(tk.END, f"{name}  ({gait['file'].name})")
+            self.listbox.insert(tk.END, self.gait_display_text(gait))
         if self.gaits:
             self.listbox.selection_set(0)
         self.listbox.bind("<<ListboxSelect>>", self.on_select)
@@ -155,6 +211,12 @@ class GaitGui(tk.Tk):
         if not selection:
             return None
         return int(selection[0])
+
+    def selected_file(self) -> Path | None:
+        idx = self.selected_index()
+        if idx is None or idx >= len(self.gaits):
+            return None
+        return self.gaits[idx]["file"]
 
     def on_select(self, _event=None):
         self.update_info()
@@ -178,15 +240,27 @@ class GaitGui(tk.Tk):
         else:
             gait = self.gaits[idx]
             data = gait["data"]
+            self.info.insert(tk.END, f"source: {gait['source_label']}\n")
             self.info.insert(tk.END, f"name: {data.get('name', gait['file'].stem)}\n")
-            self.info.insert(tk.END, f"file: {gait['file'].name}\n\n")
+            self.info.insert(tk.END, f"file: {gait['relative']}\n\n")
             self.info.insert(tk.END, f"freq: {data.get('freq')}\n")
             self.info.insert(tk.END, f"ajoint: {data.get('ajoint')} deg\n")
             self.info.insert(tk.END, f"wavelength: {data.get('wavelength')}\n\n")
+            self.info.insert(tk.END, "amp_scales:\n")
+            self.info.insert(tk.END, ", ".join(str(v) for v in data.get("amp_scales", [])))
+            self.info.insert(tk.END, "\n\n")
+            self.info.insert(tk.END, "phase_lags:\n")
+            self.info.insert(tk.END, ", ".join(str(v) for v in data.get("phase_lags", [])))
+            self.info.insert(tk.END, "\n\n")
             self.info.insert(tk.END, "joint_bias:\n")
             self.info.insert(tk.END, ", ".join(str(v) for v in data.get("joint_bias", [])))
-            self.info.insert(tk.END, "\n\n")
-            self.info.insert(tk.END, "Fixed gait will run once until first wall contact, then print average R in Metrics Window.")
+            source = data.get("source")
+            if isinstance(source, dict):
+                self.info.insert(tk.END, "\n\nexport source:\n")
+                self.info.insert(tk.END, str(source.get("type", "unknown")))
+                if "model" in source:
+                    self.info.insert(tk.END, f"\nmodel: {source['model']}")
+            self.info.insert(tk.END, "\n\nFixed gait will run once until first wall contact, then print average R in Metrics Window.")
         self.info.configure(state=tk.DISABLED)
 
     def update_mode(self):
@@ -361,14 +435,20 @@ class GaitGui(tk.Tk):
         self.metrics_text.configure(state=tk.DISABLED)
 
     def refresh_gaits(self):
-        current = self.selected_index()
+        selected_file = self.selected_file()
         self.gaits = self.load_gaits()
         self.listbox.delete(0, tk.END)
         for gait in self.gaits:
-            name = gait["data"].get("name", gait["file"].stem)
-            self.listbox.insert(tk.END, f"{name}  ({gait['file'].name})")
+            self.listbox.insert(tk.END, self.gait_display_text(gait))
         if self.gaits:
-            self.listbox.selection_set(min(current or 0, len(self.gaits) - 1))
+            selected_index = 0
+            if selected_file is not None:
+                for idx, gait in enumerate(self.gaits):
+                    if gait["file"] == selected_file:
+                        selected_index = idx
+                        break
+            self.listbox.selection_set(selected_index)
+            self.listbox.activate(selected_index)
         self.update_info()
 
     def on_close(self):
