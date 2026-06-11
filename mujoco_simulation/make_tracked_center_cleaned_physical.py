@@ -21,6 +21,12 @@ DEFAULT_OUTPUT_NAME = "tracked_center_summary_cleaned_physical.json"
 DEFAULT_PREVIEW_NAME = "tracked_center_overlay_cleaned_physical.png"
 DEFAULT_PX_PER_M = 875.0 / 1.5
 
+MIN_AUTO_LINE_NET_PX = 120.0
+MIN_AUTO_LINE_STRAIGHTNESS = 0.70
+MAX_AUTO_LINE_RMSE_RATIO = 0.22
+MAX_AUTO_CIRCLE_RMSE_RADIUS_RATIO = 0.32
+MIN_TURN_ARC_DEG = 35.0
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Export video_analysis JSON using the legacy start-to-wall tracker.")
@@ -70,7 +76,7 @@ def make_clip(video_path: Path) -> ClipConfig:
         key = "spin_left_141254"
     else:
         key = "turn_left_141203"
-    return ClipConfig(key, video_path, 8.0, "circle", roi=(80, 620, 940, 1240), min_y=1000.0)
+    return ClipConfig(key, video_path, 8.0, "auto", roi=(80, 620, 940, 1240), min_y=1000.0)
 
 
 def path_distance(points) -> float:
@@ -86,13 +92,62 @@ def straight_distance(points) -> float:
     return float(np.hypot(points[-1][1] - points[0][1], points[-1][2] - points[0][2]))
 
 
-def fit_points(points, fit_kind: str):
+def choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit):
+    path_px = path_distance(points)
+    net_px = straight_distance(points)
+    straightness = 0.0 if path_px <= 1e-9 else net_px / path_px
+    line_rmse = float(line_fit.get("rmse_px", 1e9) or 1e9)
+    circle_rmse = float(circle_fit.get("rmse_px", 1e9) or 1e9)
+    radius_px = circle_fit.get("radius_px")
+    arc_deg = float(circle_fit.get("arc_deg", 0.0) or 0.0)
+    circle_rmse_over_r = None
+    if radius_px is not None and float(radius_px) > 1e-9:
+        circle_rmse_over_r = circle_rmse / float(radius_px)
+
+    auto = {
+        "auto_fit_path_px": path_px,
+        "auto_fit_net_px": net_px,
+        "auto_fit_straightness": straightness,
+        "auto_fit_line_rmse_px": line_rmse,
+        "auto_fit_circle_rmse_px": circle_rmse,
+        "auto_fit_circle_rmse_over_radius": circle_rmse_over_r,
+        "auto_fit_circle_arc_deg": arc_deg,
+    }
+
+    line_is_good = (
+        net_px >= MIN_AUTO_LINE_NET_PX
+        and straightness >= MIN_AUTO_LINE_STRAIGHTNESS
+        and line_rmse <= MAX_AUTO_LINE_RMSE_RATIO * max(net_px, 1.0)
+    )
+    circle_is_bad = (
+        arc_deg < MIN_TURN_ARC_DEG
+        or radius_px is None
+        or (circle_rmse_over_r is not None and circle_rmse_over_r > MAX_AUTO_CIRCLE_RMSE_RADIUS_RATIO)
+        or line_rmse < 0.65 * circle_rmse
+    )
+
+    if line_is_good and circle_is_bad:
+        line_fit = {**line_fit, **auto, "auto_fit_kind": "line", "auto_fit_reason": "trajectory is straighter than circle fit"}
+        return line_curve, line_fit, "line"
+
+    circle_fit = {**circle_fit, **auto, "auto_fit_kind": "circle", "auto_fit_reason": "arc/radius fit is stronger than line fit"}
+    return circle_curve, circle_fit, "circle"
+
+
+def fit_points(points, requested_fit_kind: str):
     if len(points) < 2:
-        return None, {"status": "not_enough_points", "radius_px": None, "arc_deg": 0.0, "rmse_px": None}
+        return None, {"status": "not_enough_points", "radius_px": None, "arc_deg": 0.0, "rmse_px": None}, requested_fit_kind
     xy = np.asarray([[p[1], p[2]] for p in points], dtype=float)
-    if fit_kind == "circle" and len(points) >= 3:
-        return fit_circle(xy)
-    return fit_line(xy)
+    if requested_fit_kind == "line" or len(points) < 3:
+        curve, fit = fit_line(xy)
+        return curve, fit, "line"
+    if requested_fit_kind == "circle":
+        curve, fit = fit_circle(xy)
+        return curve, fit, "circle"
+
+    line_curve, line_fit = fit_line(xy)
+    circle_curve, circle_fit = fit_circle(xy)
+    return choose_auto_fit(points, line_curve, line_fit, circle_curve, circle_fit)
 
 
 def add_metric_units(result: dict, fit: dict, fit_kind: str, wall_seconds: float, px_per_m: float) -> dict:
@@ -138,7 +193,7 @@ def annotate_preview(preview_path: Path, result: dict) -> None:
             "Straight swim  REAL",
             f"Real: {result.get('point_count', 0)} pts",
             f"speed {speed_text}",
-            f"forward {result.get('forward_distance_m', 0.0):.3f} m",
+            f"forward {result.get('forward_distance_m', result.get('straight_distance_m', 0.0)):.3f} m",
             f"line RMSE {result.get('rmse_px', 0.0):.1f}px",
         ]
     else:
@@ -170,18 +225,19 @@ def process_video(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     points = detect_points(clip, Path.cwd())
-    curve, fit = fit_points(points, clip.fit_kind)
+    curve, fit, selected_fit_kind = fit_points(points, clip.fit_kind)
     preview_path = out_dir / preview_name
     if write_preview and curve is not None:
         draw_fit(video_path, clip.wall_seconds, points, curve, preview_path)
 
     result = {
-        "tracker_version": "legacy_start_to_wall_preview_v3",
+        "tracker_version": "legacy_start_to_wall_preview_v4_auto_fit",
         "video": str(video_path),
         "video_name": video_path.name,
         "video_stem": video_path.stem,
         "clip_key": clip.key,
-        "fit_kind": clip.fit_kind,
+        "requested_fit_kind": clip.fit_kind,
+        "fit_kind": selected_fit_kind,
         "wall_seconds": clip.wall_seconds,
         "roi": list(clip.roi),
         "min_y": clip.min_y,
@@ -193,22 +249,22 @@ def process_video(
         **fit,
         "preview_image": str(preview_path) if write_preview and curve is not None else None,
     }
-    result = add_metric_units(result, fit, clip.fit_kind, clip.wall_seconds, px_per_m)
+    result = add_metric_units(result, fit, selected_fit_kind, clip.wall_seconds, px_per_m)
     if write_preview and curve is not None:
         annotate_preview(preview_path, result)
 
     out_path = out_dir / output_name
     out_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(out_path)
-    if clip.fit_kind == "circle":
+    if selected_fit_kind == "circle":
         radius = "nan" if result["radius_px"] is None else f"{result['radius_px']:.3f}"
         rmse = "nan" if result["rmse_px"] is None else f"{result['rmse_px']:.3f}"
-        print(f"points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
+        print(f"fit=circle points={len(points)} radius_px={radius} arc_deg={result['arc_deg']:.3f} rmse_px={rmse} preview={result['preview_image']}")
     else:
         speed = result.get("forward_speed_m_s")
         speed_text = "nan" if speed is None else f"{speed:.4f}m/s"
         print(
-            f"points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} "
+            f"fit=line points={len(points)} line_length_px={result.get('length_px', 0.0):.3f} "
             f"forward_px={result.get('forward_distance_px', 0.0):.3f} "
             f"speed={speed_text} rmse_px={result.get('rmse_px', 0.0):.3f} preview={result['preview_image']}"
         )
