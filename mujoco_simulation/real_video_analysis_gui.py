@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import sys
 import threading
 from pathlib import Path
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 from make_tracked_center_cleaned_physical import (
     DEFAULT_PREVIEW_NAME,
@@ -18,8 +22,19 @@ from make_tracked_center_cleaned_physical import (
     resolve_recordings_dir,
     resolve_video,
 )
+from plot_fixed_gait_trajectories import draw_environment, plot_one, run_gait, summarize
+from plot_fitted_gait_curves import (
+    add_sim_metric_box,
+    draw_rotated_tank,
+    fitted_curve,
+    rotate_sim_xy,
+    sim_metric_text,
+    trajectory_metrics,
+)
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_PIPELINE_ROOT = Path("../gui_pipeline_outputs")
 REAL_SUBDIR = "real_video_analysis"
 SIM_SUBDIR = "fixed_gait_trajectories_3x1_5"
@@ -46,6 +61,7 @@ class RealVideoAnalysisApp:
 
         self.recordings_var = tk.StringVar(value=str(DEFAULT_RECORDINGS_DIR))
         self.video_var = tk.StringVar()
+        self.gait_json_var = tk.StringVar()
         self.out_var = tk.StringVar(value=str(DEFAULT_PIPELINE_ROOT))
         self.px_per_m_var = tk.StringVar(value=f"{DEFAULT_PX_PER_M:.6f}")
         self.preview_var = tk.BooleanVar(value=True)
@@ -68,6 +84,12 @@ class RealVideoAnalysisApp:
         ttk.Entry(file_row, textvariable=self.video_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(file_row, text="Browse", command=self.browse_video).pack(side=tk.LEFT, padx=(8, 0))
 
+        json_row = ttk.Frame(outer)
+        json_row.pack(fill=tk.X, pady=4)
+        ttk.Label(json_row, text="Gait JSON").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Entry(json_row, textvariable=self.gait_json_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Button(json_row, text="Browse", command=self.browse_gait_json).pack(side=tk.LEFT, padx=(8, 0))
+
         out_row = ttk.Frame(outer)
         out_row.pack(fill=tk.X, pady=4)
         ttk.Label(out_row, text="Pipeline output root").pack(side=tk.LEFT, padx=(0, 8))
@@ -85,13 +107,15 @@ class RealVideoAnalysisApp:
         ).grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
         ttk.Label(
             options,
-            text="Straight real speed uses fitted-line forward displacement only; lateral drift is not counted as forward speed.",
+            text="Select MP4 for real tracking, or select Gait JSON to run MuJoCo and generate the same trajectory/fitted-R analysis figures.",
         ).grid(row=2, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
 
         button_row = ttk.Frame(outer)
         button_row.pack(fill=tk.X, pady=8)
         self.single_button = ttk.Button(button_row, text="Analyze selected MP4", command=self.start_single)
         self.single_button.pack(side=tk.LEFT)
+        self.json_button = ttk.Button(button_row, text="Analyze selected JSON", command=self.start_json)
+        self.json_button.pack(side=tk.LEFT, padx=6)
         self.real3_button = ttk.Button(button_row, text="Analyze real 3 videos", command=self.start_real3)
         self.real3_button.pack(side=tk.LEFT, padx=6)
         self.sim_button = ttk.Button(button_row, text="Run MuJoCo fixed gait", command=self.start_sim)
@@ -113,6 +137,7 @@ class RealVideoAnalysisApp:
         self.logger.write(f"  {REAL_SUBDIR}/\n")
         self.logger.write(f"  {SIM_SUBDIR}/\n")
         self.logger.write(f"  {FIT_SUBDIR}/\n")
+        self.logger.write("\nUse Gait JSON + Analyze selected JSON to run a new RL gait through MuJoCo and fitted-R analysis.\n")
 
     def browse_recordings(self) -> None:
         dirname = filedialog.askdirectory(title="Select recordings folder")
@@ -126,6 +151,14 @@ class RealVideoAnalysisApp:
         )
         if filename:
             self.video_var.set(filename)
+
+    def browse_gait_json(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Select gait JSON",
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
+        )
+        if filename:
+            self.gait_json_var.set(filename)
 
     def browse_output(self) -> None:
         dirname = filedialog.askdirectory(title="Select pipeline output root")
@@ -159,7 +192,7 @@ class RealVideoAnalysisApp:
 
     def set_buttons(self, enabled: bool) -> None:
         state = tk.NORMAL if enabled else tk.DISABLED
-        for button in (self.single_button, self.real3_button, self.sim_button, self.curve_button, self.full_button):
+        for button in (self.single_button, self.json_button, self.real3_button, self.sim_button, self.curve_button, self.full_button):
             button.configure(state=state)
 
     def start_single(self) -> None:
@@ -168,6 +201,13 @@ class RealVideoAnalysisApp:
             messagebox.showerror("Missing MP4", "Please select one MP4 file first.")
             return
         self._start_thread(self._run_real_videos, [Path(video)])
+
+    def start_json(self) -> None:
+        gait_json = self.gait_json_var.get().strip()
+        if not gait_json:
+            messagebox.showerror("Missing JSON", "Please select one gait JSON file first.")
+            return
+        self._start_thread(self._run_json_gait, Path(gait_json))
 
     def start_real3(self) -> None:
         recordings_dir = self.recordings_dir()
@@ -199,6 +239,132 @@ class RealVideoAnalysisApp:
             self.root.after(0, lambda: messagebox.showerror("Analysis failed", str(exc)))
         finally:
             self.root.after(0, lambda: self.set_buttons(True))
+
+    @staticmethod
+    def _safe_name(value: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in value.strip())
+        return safe.strip("._") or "selected_gait"
+
+    @staticmethod
+    def _json_ready(value):
+        if isinstance(value, float) and not math.isfinite(value):
+            return None
+        if isinstance(value, np.generic):
+            return value.item()
+        return value
+
+    def _write_json_gait_trajectory_plot(self, png_path: Path, name: str, arr: np.ndarray, summary: dict) -> None:
+        fig, ax = plt.subplots(figsize=(7, 5), dpi=170)
+        draw_environment(ax, DEFAULT_START_X, DEFAULT_START_Y)
+        plot_one(ax, name, arr, summary)
+        ax.set_aspect("equal", adjustable="box")
+        ax.grid(True, alpha=0.25)
+        ax.set_xlabel("x (m)")
+        ax.set_ylabel("y (m)")
+        ax.set_title(f"{name} trajectory from selected JSON")
+        radius = summary.get("turn_radius_m")
+        radius_text = "inf" if radius is None or not math.isfinite(float(radius)) else f"{float(radius):.3f}"
+        ax.text(
+            0.02,
+            0.98,
+            f"time={arr[-1, 0]:.2f}s\n"
+            f"dx={summary['dx']:.3f} m, dy={summary['dy']:.3f} m\n"
+            f"yaw={summary['yaw_change_deg']:.1f} deg, rate={summary['yaw_rate_rad_s']:.3f} rad/s\n"
+            f"radius={radius_text} m",
+            transform=ax.transAxes,
+            va="top",
+            ha="left",
+            bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.85, edgecolor="#cccccc"),
+            fontsize=8,
+        )
+        fig.tight_layout()
+        fig.savefig(png_path)
+        plt.close(fig)
+
+    def _write_json_gait_fitted_plot(self, png_path: Path, name: str, arr: np.ndarray) -> dict:
+        xy = rotate_sim_xy(arr[:, 1:3])
+        curve, fit = fitted_curve(xy)
+        metrics = trajectory_metrics(arr, xy)
+
+        colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+        color = colors[0] if colors else None
+        fig, ax = plt.subplots(figsize=(4.8, 8.0), dpi=170)
+        draw_rotated_tank(ax)
+        ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=3.0)
+        ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
+        ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
+        ax.set_title(f"{name} fitted curve")
+        add_sim_metric_box(ax, sim_metric_text(name, fit, metrics))
+        fig.tight_layout()
+        fig.savefig(png_path)
+        plt.close(fig)
+
+        return {"name": name, **fit, **metrics}
+
+    def _run_json_gait(self, gait_path: Path) -> None:
+        gait_path = gait_path.expanduser().resolve()
+        if not gait_path.exists():
+            raise FileNotFoundError(f"Gait JSON not found: {gait_path}")
+
+        sim_out = self.sim_out_dir()
+        fit_out = self.fit_out_dir()
+        sim_out.mkdir(parents=True, exist_ok=True)
+        fit_out.mkdir(parents=True, exist_ok=True)
+
+        self.logger.write("\n=== MuJoCo selected JSON gait ===\n")
+        self.logger.write(f"gait_json={gait_path}\n")
+        self.logger.write(f"sim_out={sim_out}\n")
+        self.logger.write(f"fit_out={fit_out}\n")
+
+        gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, seconds=30.0, start_x=DEFAULT_START_X, start_y=DEFAULT_START_Y)
+        if arr.size == 0:
+            raise RuntimeError(f"No MuJoCo trajectory was produced for {gait_path}")
+
+        name = self._safe_name(str(gait.get("name", gait_path.stem)))
+        csv_path = sim_out / f"{name}_trajectory.csv"
+        np.savetxt(csv_path, arr, delimiter=",", header="time,x,y,yaw", comments="")
+
+        summary = summarize(arr, warmup_seconds=0.0)
+        trajectory_png = sim_out / f"{name}_trajectory.png"
+        self._write_json_gait_trajectory_plot(trajectory_png, name, arr, summary)
+
+        fixed_summary = {
+            "name": name,
+            "source_gait_json": str(gait_path),
+            "trajectory_csv": str(csv_path),
+            "trajectory_png": str(trajectory_png),
+            "duration_s": float(arr[-1, 0]),
+            "hit_wall": bool(hit_wall),
+            **{key: self._json_ready(value) for key, value in summary.items() if key != "warmup_index"},
+        }
+        fixed_summary_path = sim_out / f"{name}_summary.json"
+        fixed_summary_path.write_text(json.dumps(fixed_summary, indent=2), encoding="utf-8")
+
+        fitted_png = fit_out / f"sim_{name}_fitted_rotated.png"
+        fitted_summary = self._write_json_gait_fitted_plot(fitted_png, name, arr)
+        fitted_summary.update(
+            {
+                "source_gait_json": str(gait_path),
+                "trajectory_csv": str(csv_path),
+                "trajectory_png": str(trajectory_png),
+                "fit_png": str(fitted_png),
+                "hit_wall": bool(hit_wall),
+            }
+        )
+        fitted_summary = {key: self._json_ready(value) for key, value in fitted_summary.items()}
+        fitted_summary_path = fit_out / f"{name}_fitted_summary.json"
+        fitted_summary_path.write_text(json.dumps(fitted_summary, indent=2), encoding="utf-8")
+
+        radius = fitted_summary.get("radius")
+        radius_text = "line/inf" if radius is None else f"{float(radius):.4f}m"
+        self.logger.write(f"  trajectory CSV: {csv_path}\n")
+        self.logger.write(f"  trajectory plot: {trajectory_png}\n")
+        self.logger.write(f"  fitted plot: {fitted_png}\n")
+        self.logger.write(f"  fitted summary: {fitted_summary_path}\n")
+        self.logger.write(
+            f"  R={radius_text}, arc={float(fitted_summary.get('arc_deg') or 0.0):.3f}deg, "
+            f"rmse={float(fitted_summary.get('rmse') or 0.0):.4f}m\n"
+        )
 
     def _run_real_videos(self, videos: list[Path]) -> None:
         out_root = self.real_out_dir()
@@ -256,7 +422,7 @@ class RealVideoAnalysisApp:
 
     def _run_command(self, cmd: list[str]) -> None:
         self.logger.write("CMD: " + " ".join(cmd) + "\n")
-        proc = subprocess.run(cmd, cwd=Path.cwd(), text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        proc = subprocess.run(cmd, cwd=SCRIPT_DIR, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if proc.stdout:
             self.logger.write(proc.stdout)
         if proc.returncode != 0:
