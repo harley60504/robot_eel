@@ -86,6 +86,15 @@ cd mujoco_simulation
 python train_free_swim_rl.py
 ```
 
+Export a trained PPO policy to a fixed gait JSON:
+
+```powershell
+cd mujoco_simulation
+python export_rl_gait_json.py --model outputs/ppo_free_swim_shape.zip --output gaits/rl_straight.json
+```
+
+The exporter rolls out the trained policy, converts PPO actions back to physical CPG parameters, and saves a `gaits/*.json` file with `amp_scales` and `phase_lags`. The exported file can be opened from the GUI with `Fixed Gait`. The current RL action does not include `joint_bias`, so exported PPO gaits are straight-swim presets by default.
+
 ## Firmware
 
 The firmware files are under `robot_eel/`:
