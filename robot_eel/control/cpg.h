@@ -50,16 +50,7 @@ inline void updateCPG(float t, float dt, int j, float fb_phase, float fb_amp) {
   const float k_fb_phase = 0.8f;
   const float k_fb_amp   = 0.25f;
 
-  if (j - 1 >= 0) {
-    float desiredL = getNeighborDesiredDelta(j - 1, j);
-    float errL = wrap_pi((cpg[j-1].theta - o.theta) - desiredL);
-    dtheta += K_couple * sinf(errL);
-  }
-  if (j + 1 < bodyNum) {
-    float desiredR = getNeighborDesiredDelta(j + 1, j);
-    float errR = wrap_pi((cpg[j+1].theta - o.theta) - desiredR);
-    dtheta += K_couple * sinf(errR);
-  }
+
 
   float th_ref = omega * t + getPhaseOffset(j);
   float e_ref = wrap_pi(th_ref - o.theta);
