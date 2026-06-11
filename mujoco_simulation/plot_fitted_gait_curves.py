@@ -10,6 +10,13 @@ import numpy as np
 
 
 GAITS = ("straight", "turn_left", "turn_right", "spin_left", "spin_right")
+
+REAL_VIDEO_CONFIGS = (
+    {"stem": "clean_v_20260608_141203", "label": "real_turn_1", "kind": "turn"},
+    {"stem": "clean_v_20260608_141254", "label": "real_turn_2", "kind": "turn"},
+    {"stem": "clean_v_20260607_233739", "label": "real_straight", "kind": "straight"},
+)
+
 TANK_FORWARD_MIN = 0.0
 TANK_FORWARD_MAX = 3.0
 TANK_LATERAL_HALF = 0.75
@@ -17,24 +24,9 @@ START_FORWARD_M = 0.60
 START_LATERAL_M = 0.0
 PX_PER_M = 875.0 / 1.5
 
-MIN_FINAL_POINTS = 6
-MIN_FINAL_NET_PX = 45.0
-MIN_FINAL_PATH_PX = 55.0
-MIN_TURN_NET_PX = 60.0
-MIN_TURN_ARC_DEG = 35.0
-MIN_TURN_HEADING_DEG = 28.0
-MIN_TURN_LATERAL_SPAN_PX = 80.0
-MIN_TURN_LATERAL_DISP_PX = 70.0
-MAX_TURN_STRAIGHTNESS = 0.93
-MAX_TURN_RMSE_OVER_RADIUS = 0.75
-MIN_TURN_SCORE = 2
-STRAIGHT_FORWARD_DOMINANCE_RATIO = 1.8
-MAX_STRAIGHT_HEADING_DEG = 45.0
-MAX_STRAIGHT_LATERAL_DISP_PX = 85.0
-
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Plot fitted sim curves and final real-video motion fits.")
+    parser = argparse.ArgumentParser(description="Plot fitted sim curves and import selected real videos.")
     parser.add_argument("--sim-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_3x1_5"))
     parser.add_argument("--video-analysis-dir", type=Path, default=Path("outputs/video_analysis"))
     parser.add_argument("--recordings-dir", type=Path, default=Path("../Release/python_backend/recordings"))
@@ -47,13 +39,6 @@ def resolve_from_cwd(path: Path) -> Path:
     if path.is_absolute():
         return path
     return (Path.cwd() / path).resolve()
-
-
-def safe_read_json(path: Path) -> dict:
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
 
 
 def rotate_sim_xy(xy: np.ndarray) -> np.ndarray:
@@ -73,26 +58,15 @@ def fit_circle_xy(xy: np.ndarray):
     return np.array([float(cx), float(cy)]), radius, rmse, theta
 
 
-def fit_line_xy(xy: np.ndarray, count: int = 240):
-    if xy.shape[0] < 2:
-        curve = np.repeat(xy[:1], count, axis=0) if xy.shape[0] else np.zeros((count, 2), dtype=float)
-        return curve, {"kind": "line", "rmse": 0.0, "length": 0.0}
-    center = xy.mean(axis=0)
-    _, _, vh = np.linalg.svd(xy - center, full_matrices=False)
-    direction = vh[0]
-    if np.dot(direction, xy[-1] - xy[0]) < 0:
-        direction = -direction
-    projection = (xy - center) @ direction
-    s = np.linspace(float(projection.min()), float(projection.max()), count)
-    curve = center + np.outer(s, direction)
-    residual = np.linalg.norm((xy - center) - np.outer(projection, direction), axis=1)
-    return curve, {
-        "kind": "line",
-        "rmse": float(np.sqrt(np.mean(residual**2))),
-        "length": float(np.linalg.norm(curve[-1] - curve[0])),
-        "line_start_px": curve[0].tolist(),
-        "line_end_px": curve[-1].tolist(),
-    }
+def fit_line_curve(xy: np.ndarray, count: int = 220) -> np.ndarray:
+    direction = xy[-1] - xy[0]
+    norm = np.linalg.norm(direction)
+    if norm < 1e-9:
+        return np.repeat(xy[:1], count, axis=0)
+    unit = direction / norm
+    scalar = (xy - xy[0]) @ unit
+    s = np.linspace(float(scalar.min()), float(scalar.max()), count)
+    return xy[0] + np.outer(s, unit)
 
 
 def fitted_curve(xy: np.ndarray, count: int = 240, force_circle: bool = False):
@@ -101,146 +75,11 @@ def fitted_curve(xy: np.ndarray, count: int = 240, force_circle: bool = False):
     delta = xy[-1] - xy[0]
     nearly_straight = abs(delta[0]) < 0.08 * max(abs(delta[1]), 1e-9) and abs(delta[1]) > 0.5
     if not force_circle and (nearly_straight or radius > 20.0 or span < 0.12):
-        curve, line_fit = fit_line_xy(xy, count=count)
-        return curve, {"kind": "line", "radius": None, "rmse": line_fit["rmse"], "arc_deg": 0.0}
+        curve = fit_line_curve(xy, count=count)
+        return curve, {"kind": "line", "radius": None, "rmse": rmse, "arc_deg": 0.0}
     angles = np.linspace(float(theta[0]), float(theta[-1]), count)
     curve = np.column_stack((center[0] + radius * np.cos(angles), center[1] + radius * np.sin(angles)))
-    return curve, {"kind": "circle", "center": center.tolist(), "radius": radius, "rmse": rmse, "arc_deg": float(np.degrees(span))}
-
-
-def path_distance_xy(xy: np.ndarray) -> float:
-    if xy.shape[0] < 2:
-        return 0.0
-    return float(np.sum(np.hypot(np.diff(xy[:, 0]), np.diff(xy[:, 1]))))
-
-
-def net_distance_xy(xy: np.ndarray) -> float:
-    if xy.shape[0] < 2:
-        return 0.0
-    return float(np.linalg.norm(xy[-1] - xy[0]))
-
-
-def heading_change_deg(xy: np.ndarray) -> float:
-    if xy.shape[0] < 5:
-        return 0.0
-    k = max(2, min(xy.shape[0] // 4, 6))
-    v1 = xy[k] - xy[0]
-    v2 = xy[-1] - xy[-1 - k]
-    if np.linalg.norm(v1) < 1e-6 or np.linalg.norm(v2) < 1e-6:
-        return 0.0
-    cross = float(v1[0] * v2[1] - v1[1] * v2[0])
-    dot = float(np.dot(v1, v2))
-    return float(abs(np.degrees(np.arctan2(cross, dot))))
-
-
-def classify_real_points(points: np.ndarray, source_summary: dict) -> dict:
-    if source_summary.get("valid_track") is False:
-        return {
-            "final_motion_class": "invalid_track",
-            "final_fit_kind": "invalid_track",
-            "final_reason": source_summary.get("invalid_reason") or "source summary marked invalid",
-        }
-    if points.shape[0] < MIN_FINAL_POINTS:
-        return {
-            "final_motion_class": "invalid_track",
-            "final_fit_kind": "invalid_track",
-            "final_reason": "too few cleaned points for final fit",
-        }
-
-    xy = points[:, 1:3]
-    path_px = path_distance_xy(xy)
-    net_px = net_distance_xy(xy)
-    if net_px < MIN_FINAL_NET_PX or path_px < MIN_FINAL_PATH_PX:
-        return {
-            "final_motion_class": "invalid_track",
-            "final_fit_kind": "invalid_track",
-            "final_reason": "final track is too short",
-            "final_path_px": path_px,
-            "final_net_px": net_px,
-        }
-
-    line_curve, line_fit = fit_line_xy(xy)
-    circle_curve, circle_fit = fitted_curve(xy, force_circle=True)
-    radius_px = circle_fit.get("radius")
-    circle_rmse = float(circle_fit.get("rmse", 1e9))
-    arc_deg = float(circle_fit.get("arc_deg", 0.0))
-    line_rmse = float(line_fit.get("rmse", 1e9))
-    straightness = net_px / max(path_px, 1e-9)
-    lateral_span = float(np.ptp(xy[:, 0]))
-    lateral_disp = float(abs(xy[-1, 0] - xy[0, 0]))
-    forward_disp = float(abs(xy[-1, 1] - xy[0, 1]))
-    heading_deg = heading_change_deg(xy)
-    rmse_over_r = None if not radius_px or radius_px <= 1e-9 else circle_rmse / radius_px
-
-    forward_dominant = forward_disp >= STRAIGHT_FORWARD_DOMINANCE_RATIO * max(lateral_disp, 1.0)
-    body_wiggle_not_turn = lateral_span >= MIN_TURN_LATERAL_SPAN_PX and lateral_disp <= 0.55 * lateral_span
-    straight_override = (
-        forward_dominant
-        and lateral_disp <= MAX_STRAIGHT_LATERAL_DISP_PX
-        and heading_deg <= MAX_STRAIGHT_HEADING_DEG
-    )
-
-    evidence = []
-    if arc_deg >= MIN_TURN_ARC_DEG:
-        evidence.append("arc")
-    if heading_deg >= MIN_TURN_HEADING_DEG:
-        evidence.append("heading")
-    if lateral_disp >= MIN_TURN_LATERAL_DISP_PX:
-        evidence.append("lateral_disp")
-    if lateral_span >= MIN_TURN_LATERAL_SPAN_PX and lateral_disp >= 45.0:
-        evidence.append("lateral_span_with_drift")
-    if rmse_over_r is not None and rmse_over_r <= MAX_TURN_RMSE_OVER_RADIUS:
-        evidence.append("circle_fit")
-    if straightness <= MAX_TURN_STRAIGHTNESS and (heading_deg >= 18.0 or lateral_disp >= 45.0):
-        evidence.append("not_straight")
-
-    strong_lateral_turn = lateral_disp >= 95.0
-    has_directional_turn = heading_deg >= MIN_TURN_HEADING_DEG or lateral_disp >= MIN_TURN_LATERAL_DISP_PX or arc_deg >= 55.0
-    is_turn = (
-        not straight_override
-        and net_px >= MIN_TURN_NET_PX
-        and radius_px is not None
-        and has_directional_turn
-        and (strong_lateral_turn or len(evidence) >= MIN_TURN_SCORE)
-    )
-
-    common = {
-        "final_path_px": path_px,
-        "final_net_px": net_px,
-        "final_forward_displacement_px": forward_disp,
-        "final_straightness": straightness,
-        "final_line_rmse_px": line_rmse,
-        "final_circle_rmse_px": circle_rmse,
-        "final_circle_rmse_over_radius": rmse_over_r,
-        "final_arc_deg": arc_deg,
-        "final_heading_change_deg": heading_deg,
-        "final_lateral_span_px": lateral_span,
-        "final_lateral_displacement_px": lateral_disp,
-        "final_forward_dominant": bool(forward_dominant),
-        "final_body_wiggle_not_turn": bool(body_wiggle_not_turn),
-        "final_straight_override": bool(straight_override),
-        "final_turn_evidence": evidence,
-        "final_turn_evidence_score": len(evidence),
-    }
-
-    if is_turn:
-        return {
-            **common,
-            "final_motion_class": "turn",
-            "final_fit_kind": "circle",
-            "final_reason": f"turn evidence={','.join(evidence)}",
-            "curve": circle_curve,
-            "fit": circle_fit,
-        }
-    reason = "straight override: forward displacement dominates body wiggle" if straight_override else f"not enough turn evidence={','.join(evidence)}"
-    return {
-        **common,
-        "final_motion_class": "straight",
-        "final_fit_kind": "line",
-        "final_reason": reason,
-        "curve": line_curve,
-        "fit": line_fit,
-    }
+    return curve, {"kind": "circle", "radius": radius, "rmse": rmse, "arc_deg": float(np.degrees(span))}
 
 
 def trajectory_metrics(arr: np.ndarray, xy_view: np.ndarray) -> dict:
@@ -336,6 +175,7 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
     if not files:
         print(f"skip sim curves: no *_trajectory.csv in {sim_dir}")
         return rows
+
     fig, ax = plt.subplots(figsize=(5.2, 8.2), dpi=170)
     draw_rotated_tank(ax)
     for idx, csv_path in enumerate(files):
@@ -353,20 +193,46 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=26, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=44, marker="x", color=color, linewidth=2.0, zorder=4)
         rows.append({"name": name, **fit, **metrics})
+
     if not rows:
+        print(f"skip sim curves: trajectory files in {sim_dir} had too few points")
         plt.close(fig)
         return rows
+
     ax.set_title("MuJoCo fitted curves, rotated to camera view")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
     fig.savefig(out_dir / "sim_fitted_curves_rotated.png")
     plt.close(fig)
+
+    for idx, csv_path in enumerate(files):
+        name = csv_path.name.removesuffix("_trajectory.csv")
+        arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+        if arr.ndim == 1:
+            arr = arr.reshape(1, -1)
+        if arr.shape[0] < 2:
+            continue
+        xy = rotate_sim_xy(arr[:, 1:3])
+        curve, fit = fitted_curve(xy)
+        metrics = trajectory_metrics(arr, xy)
+        fig, ax = plt.subplots(figsize=(4.8, 8.0), dpi=170)
+        draw_rotated_tank(ax)
+        color = colors[idx % len(colors)]
+        ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=3.0)
+        ax.scatter([xy[0, 0]], [xy[0, 1]], s=34, color=color, edgecolor="black", zorder=4)
+        ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=52, marker="x", color=color, linewidth=2.2, zorder=4)
+        ax.set_title(f"{name} fitted curve")
+        add_sim_metric_box(ax, sim_metric_text(name, fit, metrics))
+        fig.tight_layout()
+        fig.savefig(out_dir / f"sim_{name}_fitted_rotated.png")
+        plt.close(fig)
+
     (out_dir / "sim_fitted_summary.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return rows
 
 
 def points_from_summary(summary_path: Path) -> np.ndarray:
-    data = safe_read_json(summary_path)
+    data = json.loads(summary_path.read_text(encoding="utf-8"))
     points = data.get("cleaned_points", [])
     arr = np.asarray(points, dtype=np.float64)
     if arr.size == 0:
@@ -378,7 +244,14 @@ def points_from_summary(summary_path: Path) -> np.ndarray:
 
 def point_distance_metrics(points: np.ndarray) -> dict:
     if points.shape[0] < 2:
-        return {"point_count": int(points.shape[0]), "duration_s": 0.0, "straight_distance_px": 0.0, "path_distance_px": 0.0, "net_dx_px": 0.0, "net_dy_px": 0.0}
+        return {
+            "point_count": int(points.shape[0]),
+            "duration_s": 0.0,
+            "straight_distance_px": 0.0,
+            "path_distance_px": 0.0,
+            "net_dx_px": 0.0,
+            "net_dy_px": 0.0,
+        }
     t = points[:, 0]
     x = points[:, 1]
     y = points[:, 2]
@@ -395,10 +268,16 @@ def point_distance_metrics(points: np.ndarray) -> dict:
     }
 
 
+def safe_read_summary(summary_path: Path) -> dict:
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
 def real_speed_from_summary(summary_data: dict, distance_metrics: dict) -> float | None:
-    for key in ("speed_m_s", "forward_speed_m_s", "mean_speed_m_s"):
-        if summary_data.get(key) is not None:
-            return float(summary_data[key])
+    if summary_data.get("forward_speed_m_s") is not None:
+        return float(summary_data["forward_speed_m_s"])
     duration = float(distance_metrics.get("duration_s", 0.0))
     if duration <= 1e-9:
         return None
@@ -432,108 +311,77 @@ def draw_metric_box(frame, lines: list[str], font_scale: float = 0.9) -> None:
         y = baseline_y + line_gap
 
 
-def draw_invalid_frame(video_path: Path, out_dir: Path, label: str, summary_path: Path, summary_data: dict, reason: str, point_count: int):
+def draw_no_points_frame(video_path: Path, out_dir: Path, label: str, kind: str, summary_path: Path):
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
     cap.release()
     if not ok:
         frame = np.zeros((720, 1280, 3), dtype=np.uint8)
-    draw_metric_box(frame, ["Invalid track", f"points = {point_count}", reason[:36]])
+    cv2.putText(frame, f"{label}: no tracked points", (40, 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 3, cv2.LINE_AA)
     stem = video_path.stem
-    out_img = out_dir / f"video_{stem}_invalid_track.png"
-    out_json = out_dir / f"video_{stem}_final_summary.json"
+    out_img = out_dir / f"video_{stem}_no_points.png"
+    out_json = out_dir / f"video_{stem}_no_points_summary.json"
     summary = {
         "label": label,
+        "kind": kind,
         "video": str(video_path),
-        "source_summary": str(summary_path),
-        "final_motion_class": "invalid_track",
-        "final_fit_kind": "invalid_track",
-        "final_reason": reason,
-        "point_count": point_count,
-        "source_fit_kind": summary_data.get("fit_kind"),
-        "source_valid_track": summary_data.get("valid_track"),
+        "summary": str(summary_path),
+        "point_count": 0,
+        "status": "no tracked points",
+        "straight_distance_px": 0.0,
+        "path_distance_px": 0.0,
     }
     cv2.imwrite(str(out_img), frame)
     out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return out_img, summary
 
 
-def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label: str):
-    summary_data = safe_read_json(summary_path)
+def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label: str, kind: str):
     points = points_from_summary(summary_path)
-    decision = classify_real_points(points, summary_data)
-    if decision["final_fit_kind"] == "invalid_track":
-        return draw_invalid_frame(video_path, out_dir, label, summary_path, summary_data, decision.get("final_reason", "invalid track"), int(points.shape[0]))
     if points.shape[0] < 2:
-        return draw_invalid_frame(video_path, out_dir, label, summary_path, summary_data, "not enough points", int(points.shape[0]))
-
+        return draw_no_points_frame(video_path, out_dir, label, kind, summary_path)
     xy = points[:, 1:3]
     distance_metrics = point_distance_metrics(points)
+    summary_data = safe_read_summary(summary_path)
     cap = cv2.VideoCapture(str(video_path))
     ok, frame = cap.read()
     cap.release()
     if not ok:
         raise RuntimeError(f"Could not read {video_path}")
-
     stem = video_path.stem
+    summary = {"label": label, "kind": kind, "video": str(video_path), "summary": str(summary_path), **distance_metrics}
     poly = np.round(xy).astype(np.int32)
-    curve = decision["curve"]
-    fit = decision["fit"]
-    fit_kind = decision["final_fit_kind"]
-
-    if fit_kind == "circle":
+    if kind == "turn":
+        curve, fit = fitted_curve(xy, count=260, force_circle=True)
         curve_i = np.round(curve).astype(np.int32)
         cv2.polylines(frame, [curve_i], False, (0, 0, 255), 6, cv2.LINE_AA)
         cv2.polylines(frame, [poly], False, (0, 255, 255), 2, cv2.LINE_AA)
         cv2.circle(frame, tuple(poly[0]), 9, (0, 255, 0), -1, cv2.LINE_AA)
         cv2.circle(frame, tuple(poly[-1]), 9, (0, 0, 255), -1, cv2.LINE_AA)
-        radius_m = None if fit.get("radius") is None else float(fit["radius"]) / PX_PER_M
+        radius_m = None if fit["radius"] is None else float(fit["radius"]) / PX_PER_M
         speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
+        summary.update({"fit_kind": fit["kind"], "radius_px": fit["radius"], "radius_m": radius_m, "rmse_px": fit["rmse"], "rmse_m": fit["rmse"] / PX_PER_M, "arc_deg": fit["arc_deg"], "speed_m_s": speed_m_s})
         radius_text = "nan" if radius_m is None else f"{radius_m:.3f} m"
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"arc = {fit.get('arc_deg', 0.0):.1f} deg", f"RMSE = {fit.get('rmse', 0.0):.1f}px"])
+        draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"arc = {fit['arc_deg']:.1f} deg", f"RMSE = {fit['rmse']:.1f}px"])
         out_img = out_dir / f"video_{stem}_fit_curve.png"
+        out_json = out_dir / f"video_{stem}_fit_summary.json"
     else:
-        curve_i = np.round(curve).astype(np.int32)
-        cv2.polylines(frame, [curve_i], False, (255, 0, 0), 4, cv2.LINE_AA)
-        cv2.polylines(frame, [poly], False, (0, 255, 255), 2, cv2.LINE_AA)
-        cv2.circle(frame, tuple(poly[0]), 9, (0, 255, 0), -1, cv2.LINE_AA)
-        cv2.circle(frame, tuple(poly[-1]), 9, (0, 0, 255), -1, cv2.LINE_AA)
+        cv2.polylines(frame, [poly], False, (0, 255, 255), 4, cv2.LINE_AA)
+        start = tuple(poly[0])
+        end = tuple(poly[-1])
+        cv2.circle(frame, start, 10, (0, 255, 0), -1, cv2.LINE_AA)
+        cv2.circle(frame, end, 10, (0, 0, 255), -1, cv2.LINE_AA)
+        cv2.line(frame, start, end, (255, 0, 0), 3, cv2.LINE_AA)
         speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
         forward_m = summary_data.get("forward_distance_m")
         if forward_m is None:
             forward_m = distance_metrics["straight_distance_px"] / PX_PER_M
+        summary.update({"fit_kind": "line", "radius_m": None, "forward_distance_m": float(forward_m), "forward_speed_m_s": speed_m_s, "rmse_px": summary_data.get("rmse_px")})
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {fit.get('rmse', 0.0):.1f}px"])
+        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {summary_data.get('rmse_px', 0.0):.1f}px"])
         out_img = out_dir / f"video_{stem}_straight_distance.png"
-
-    summary = {
-        "label": label,
-        "video": str(video_path),
-        "source_summary": str(summary_path),
-        "source_fit_kind": summary_data.get("fit_kind"),
-        "source_valid_track": summary_data.get("valid_track"),
-        **distance_metrics,
-        **{k: v for k, v in decision.items() if k not in {"curve", "fit"}},
-    }
-    if fit_kind == "circle":
-        summary.update({
-            "radius_px": fit.get("radius"),
-            "radius_m": None if fit.get("radius") is None else float(fit["radius"]) / PX_PER_M,
-            "rmse_px": fit.get("rmse"),
-            "rmse_m": None if fit.get("rmse") is None else float(fit["rmse"]) / PX_PER_M,
-            "arc_deg": fit.get("arc_deg"),
-            "speed_m_s": real_speed_from_summary(summary_data, distance_metrics),
-        })
-    else:
-        summary.update({
-            "radius_m": None,
-            "forward_distance_m": summary_data.get("forward_distance_m", distance_metrics["straight_distance_px"] / PX_PER_M),
-            "forward_speed_m_s": real_speed_from_summary(summary_data, distance_metrics),
-            "rmse_px": fit.get("rmse"),
-        })
-
-    out_json = out_dir / f"video_{stem}_final_summary.json"
+        out_json = out_dir / f"video_{stem}_straight_distance_summary.json"
     cv2.imwrite(str(out_img), frame)
     out_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return out_img, summary
@@ -543,30 +391,30 @@ def dynamic_real_configs(video_analysis_dir: Path, recordings_dir: Path):
     summaries = sorted(video_analysis_dir.glob("*/tracked_center_summary_cleaned_physical.json"))
     configs = []
     for summary_path in summaries:
-        data = safe_read_json(summary_path)
+        data = safe_read_summary(summary_path)
         stem = data.get("video_stem") or summary_path.parent.name
         video_value = data.get("video")
         video_path = Path(video_value) if video_value else recordings_dir / f"{stem}.mp4"
         if not video_path.exists():
             fallback = recordings_dir / f"{stem}.mp4"
             video_path = fallback if fallback.exists() else video_path
-        configs.append({"stem": stem, "label": stem, "summary_path": summary_path, "video_path": video_path})
+        motion_class = str(data.get("motion_class") or data.get("fit_kind") or "").lower()
+        kind = "straight" if motion_class in {"line", "straight"} else "turn"
+        configs.append({"stem": stem, "label": stem, "kind": kind, "summary_path": summary_path, "video_path": video_path})
     return configs
 
 
 def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: Path):
     rows = []
-    configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
+    dynamic_configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
+    configs = dynamic_configs if dynamic_configs else []
     if not configs:
-        for stem in ("clean_v_20260608_141203", "clean_v_20260608_141254", "clean_v_20260607_233739"):
-            configs.append({
-                "stem": stem,
-                "label": stem,
-                "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json",
-                "video_path": recordings_dir / f"{stem}.mp4",
-            })
+        for config in REAL_VIDEO_CONFIGS:
+            stem = config["stem"]
+            configs.append({"stem": stem, "label": config["label"], "kind": config["kind"], "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json", "video_path": recordings_dir / f"{stem}.mp4"})
     for config in configs:
         label = config["label"]
+        kind = config["kind"]
         summary_path = config["summary_path"]
         video_path = config["video_path"]
         if not summary_path.exists() or not video_path.exists():
@@ -574,19 +422,19 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
             print(f"  summary={summary_path}")
             print(f"  video={video_path}")
             continue
-        out_img, summary = draw_real_result(video_path, summary_path, out_dir, label)
+        out_img, summary = draw_real_result(video_path, summary_path, out_dir, label, kind)
         rows.append(summary)
         print(out_img)
-        cls = summary.get("final_motion_class")
-        if cls == "turn":
+        if summary.get("status") == "no tracked points":
+            print(f"{label}: no tracked points; check marker color / threshold / video file")
+            continue
+        if kind == "turn":
             radius = "nan" if summary.get("radius_m") is None else f"{summary['radius_m']:.3f}m"
             speed = "nan" if summary.get("speed_m_s") is None else f"{summary['speed_m_s']:.3f}m/s"
-            print(f"{label}: FINAL turn radius={radius} speed={speed} evidence={summary.get('final_turn_evidence')}")
-        elif cls == "straight":
-            speed = "nan" if summary.get("forward_speed_m_s") is None else f"{summary['forward_speed_m_s']:.3f}m/s"
-            print(f"{label}: FINAL straight speed={speed} forward={summary.get('forward_distance_m', 0.0):.3f}m reason={summary.get('final_reason')}")
+            print(f"{label}: radius={radius} speed={speed} arc={summary.get('arc_deg', 0.0):.1f}deg rmse={summary.get('rmse_px', 0.0):.3f}px points={summary['point_count']}")
         else:
-            print(f"{label}: FINAL invalid reason={summary.get('final_reason')}")
+            speed = "nan" if summary.get("forward_speed_m_s") is None else f"{summary['forward_speed_m_s']:.3f}m/s"
+            print(f"{label}: R=inf speed={speed} forward={summary.get('forward_distance_m', 0.0):.3f}m duration={summary['duration_s']:.3f}s points={summary['point_count']}")
     (out_dir / "real_video_summary.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return rows
 
@@ -604,9 +452,17 @@ def main():
     for row in sim_rows:
         radius = "R=∞m" if row["radius"] is None else f"R={row['radius']:.3f}m"
         if row["radius"] is None or row["name"] == "straight":
-            print(f"{row['name']}: line R=∞m forward_speed={row['mean_forward_speed_m_s']:.3f}m/s")
+            print(f"{row['name']}: line R=∞m forward_distance={row['forward_displacement_m']:.3f}m forward_speed={row['mean_forward_speed_m_s']:.3f}m/s lateral_drift={row['lateral_drift_m']:.3f}m rmse={row['rmse']:.4f}")
         else:
-            print(f"{row['name']}: {row['kind']} {radius} arc={row['arc_deg']:.1f}deg speed={row['mean_speed_m_s']:.3f}m/s")
+            print(f"{row['name']}: {row['kind']} {radius} arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} speed={row['mean_speed_m_s']:.3f}m/s")
+    straight_row = next((row for row in sim_rows if row["name"] == "straight"), None)
+    if straight_row is not None:
+        print("\nSim straight swimming speed summary")
+        print(f"  mean path speed       = {straight_row['mean_speed_m_s']:.4f} m/s  (includes lateral oscillation)")
+        print(f"  mean forward speed    = {straight_row['mean_forward_speed_m_s']:.4f} m/s  (used for straight figure)")
+        print(f"  forward displacement  = {straight_row['forward_displacement_m']:.4f} m")
+        print(f"  lateral drift         = {straight_row['lateral_drift_m']:.4f} m")
+        print(f"  duration              = {straight_row['duration_s']:.4f} s")
     if args.sim_only:
         return
     print("\nReal video summary")
