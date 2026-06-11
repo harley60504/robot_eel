@@ -93,7 +93,33 @@ cd mujoco_simulation
 python export_rl_gait_json.py --model outputs/ppo_free_swim_shape.zip --output gaits/rl_straight.json
 ```
 
-The exporter rolls out the trained policy, converts PPO actions back to physical CPG parameters, and saves a `gaits/*.json` file with `amp_scales` and `phase_lags`. The exported file can be opened from the GUI with `Fixed Gait`. The current RL action does not include `joint_bias`, so exported PPO gaits are straight-swim presets by default.
+The exporter rolls out the trained policy, converts PPO actions back to physical CPG parameters, and saves a `gaits/*.json` file with `amp_scales` and `phase_lags`. The exported file can be opened from the GUI with `Fixed Gait`. The free-swim RL action does not include `joint_bias`, so exported free-swim PPO gaits are straight-swim presets by default.
+
+Train a turning PPO policy with a turning reward:
+
+```powershell
+cd mujoco_simulation
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --output outputs/ppo_turn_left_shape_bias
+python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --output outputs/ppo_turn_right_shape_bias
+```
+
+The turning RL action has 17 values: `6 amp_scales + 5 phase_lags + 6 joint_bias`. Its reward encourages target signed yaw rate or optional target radius, useful forward speed, correct turn direction, low lateral slip, low energy, and smooth actions.
+
+Export trained turning policies to fixed turning gait JSON files:
+
+```powershell
+cd mujoco_simulation
+python export_turning_rl_gait_json.py --turn-direction left --model outputs/ppo_turn_left_shape_bias.zip --output gaits/rl_turn_left.json
+python export_turning_rl_gait_json.py --turn-direction right --model outputs/ppo_turn_right_shape_bias.zip --output gaits/rl_turn_right.json
+```
+
+Validate the exported open-loop turning gaits:
+
+```powershell
+cd mujoco_simulation
+python measure_turning.py --gait gaits/rl_turn_left.json
+python measure_turning.py --gait gaits/rl_turn_right.json
+```
 
 ## Firmware
 
