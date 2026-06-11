@@ -43,12 +43,15 @@ class TurningConfig:
     target_yaw_rate: float = 0.45
     target_radius: float | None = None
     normalized_actions: bool = True
-    amp_scale_lows: tuple[float, ...] = (1.05, 0.90, 0.85, 0.90, 0.95, 1.00)
-    amp_scale_highs: tuple[float, ...] = (1.40, 1.25, 1.20, 1.30, 1.40, 1.50)
-    phase_lag_lows: tuple[float, ...] = (0.50, 0.50, 0.50, 0.50, 0.50)
-    phase_lag_highs: tuple[float, ...] = (0.75, 0.75, 0.75, 0.75, 0.75)
+
+    # Turning PPO now learns only static joint bias.  The forward-wave shape is
+    # fixed so PPO cannot destroy the coherent CPG traveling wave while learning
+    # to bend the body for turning.
+    fixed_amp_scales: tuple[float, ...] = (1.225, 1.075, 1.000, 1.075, 1.150, 1.225)
+    fixed_phase_lags: tuple[float, ...] = (0.614439, 0.614439, 0.614439, 0.614439, 0.614439)
     joint_bias_low: float = -0.30
     joint_bias_high: float = 0.30
+
     reward_average_seconds: float = 0.6
     speed_weight: float = 0.60
     yaw_rate_weight: float = 1.20
@@ -64,15 +67,14 @@ class TurningConfig:
 
 
 class EelTurningRLEnv(gym.Env if gym is not None else object):
-    """Train open-loop turning gaits by learning CPG shape plus static joint bias.
+    """Train open-loop turning gaits by learning only static joint bias.
 
     Action layout:
-        0:6   amp_scales
-        6:11  phase_lags
-        11:17 joint_bias in radians
+        0:6  joint_bias in radians
 
-    Positive target yaw rate is treated as left/CCW turning. Negative target yaw
-    rate is treated as right/CW turning.
+    Amplitude and inter-joint phase lags are fixed by TurningConfig.  Positive
+    target yaw rate is treated as left/CCW turning.  Negative target yaw rate is
+    treated as right/CW turning.
     """
 
     metadata = {"render_modes": []}
@@ -82,6 +84,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             raise ImportError("Install gymnasium first: python -m pip install gymnasium")
 
         self.cfg = config or TurningConfig()
+        self._validate_fixed_gait()
         self.model = mujoco.MjModel.from_xml_path(self.cfg.xml_path)
         self.data = mujoco.MjData(self.model)
         self.model.opt.gravity[:] = (0, 0, 0)
@@ -100,7 +103,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.max_steps = max(1, int(round(self.cfg.episode_seconds / self.cfg.control_dt)))
         self.warmup_steps = max(0, int(round(self.cfg.warmup_seconds / self.cfg.control_dt)))
         self.step_count = 0
-        self.action_dim = 17
+        self.action_dim = 6
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
         self.cpg = HopfCPG(num_joints=6)
         self.metric_window = deque(
@@ -117,7 +120,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             lows, highs = self._action_bounds()
             self.action_space = spaces.Box(lows.astype(np.float32), highs.astype(np.float32), dtype=np.float32)
 
-        # q(6), qd(6), cpg features(4), root features(9), previous action summary(3)
+        # q(6), qd(6), cpg features(4), root features(9), previous summary(3)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(28,), dtype=np.float32)
 
     @property
@@ -139,9 +142,9 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         action = np.asarray(action, dtype=np.float64)
         action = np.clip(action, self.action_space.low, self.action_space.high)
         physical_action = self._physical_action(action)
-        amp_scales = tuple(float(value) for value in physical_action[:6])
-        phase_lags = tuple(float(value) for value in physical_action[6:11])
-        joint_bias = tuple(float(value) for value in physical_action[11:17])
+        joint_bias = tuple(float(value) for value in physical_action[:6])
+        amp_scales = tuple(float(value) for value in self.cfg.fixed_amp_scales)
+        phase_lags = tuple(float(value) for value in self.cfg.fixed_phase_lags)
 
         params = HopfCPGParams(
             frequency=self.cfg.fixed_frequency,
@@ -176,7 +179,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         wrong_direction_error = max(0.0, -signed_turn)
         energy = float(np.mean(np.square(self.data.ctrl[self.tail_ctrl_slice])))
         action_delta = float(np.linalg.norm(action - self.prev_action))
-        prev_bias = self._physical_action(self.prev_action)[11:17]
+        prev_bias = self._physical_action(self.prev_action)
         bias_delta = float(np.linalg.norm(np.asarray(joint_bias, dtype=np.float64) - prev_bias))
         self.prev_action = action.copy()
 
@@ -240,6 +243,9 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             "bias_delta": bias_delta,
             "steady_state": steady_state,
             "physical_action": physical_action.astype(np.float32),
+            "joint_bias": np.asarray(joint_bias, dtype=np.float32),
+            "fixed_amp_scales": np.asarray(amp_scales, dtype=np.float32),
+            "fixed_phase_lags": np.asarray(phase_lags, dtype=np.float32),
             "reward_speed": reward_speed,
             "reward_yaw_rate": reward_yaw_rate,
             "reward_radius": reward_radius,
@@ -251,18 +257,18 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         }
         return self._obs(), float(reward), terminated, truncated, info
 
+    def _validate_fixed_gait(self) -> None:
+        if len(self.cfg.fixed_amp_scales) != 6:
+            raise ValueError("fixed_amp_scales must have 6 values")
+        if len(self.cfg.fixed_phase_lags) != 5:
+            raise ValueError("fixed_phase_lags must have 5 values")
+        if self.cfg.joint_bias_low > self.cfg.joint_bias_high:
+            raise ValueError("joint_bias_low cannot be greater than joint_bias_high")
+
     def _action_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        amp_lows = np.asarray(self.cfg.amp_scale_lows, dtype=np.float64)
-        amp_highs = np.asarray(self.cfg.amp_scale_highs, dtype=np.float64)
-        phase_lows = np.asarray(self.cfg.phase_lag_lows, dtype=np.float64)
-        phase_highs = np.asarray(self.cfg.phase_lag_highs, dtype=np.float64)
-        if amp_lows.size != 6 or amp_highs.size != 6:
-            raise ValueError("amp bounds must have 6 values")
-        if phase_lows.size != 5 or phase_highs.size != 5:
-            raise ValueError("phase bounds must have 5 values")
         bias_lows = np.full(6, float(self.cfg.joint_bias_low), dtype=np.float64)
         bias_highs = np.full(6, float(self.cfg.joint_bias_high), dtype=np.float64)
-        return np.concatenate((amp_lows, phase_lows, bias_lows)), np.concatenate((amp_highs, phase_highs, bias_highs))
+        return bias_lows, bias_highs
 
     def _physical_action(self, action: np.ndarray) -> np.ndarray:
         if not self.cfg.normalized_actions:
@@ -300,9 +306,9 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         )
         prev_summary = np.array(
             [
-                float(np.mean(self.prev_action[:6])),
-                float(np.mean(self.prev_action[6:11])),
-                float(np.mean(self.prev_action[11:17])),
+                float(np.mean(self.cfg.fixed_amp_scales)),
+                float(np.mean(self.cfg.fixed_phase_lags)),
+                float(np.mean(self.prev_action)),
             ],
             dtype=np.float64,
         )
@@ -321,5 +327,6 @@ if __name__ == "__main__":
             break
     print("turning RL smoke test OK")
     print("obs shape:", obs.shape)
+    print("action shape:", env.action_space.shape)
     print("last info:", info)
     print("total reward:", round(total_reward, 3))
