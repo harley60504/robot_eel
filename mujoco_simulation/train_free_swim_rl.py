@@ -31,47 +31,14 @@ def parse_args():
     parser.add_argument("--ajoint", type=float, default=None, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--amp-scale-lows", type=lambda value: parse_float_list(value, 6, "amp-scale-lows"), default=None)
     parser.add_argument("--amp-scale-highs", type=lambda value: parse_float_list(value, 6, "amp-scale-highs"), default=None)
-    parser.add_argument(
-        "--shared-phase-lag-low",
-        type=float,
-        default=None,
-        help="Lower physical bound for the single shared phase lag action.",
-    )
-    parser.add_argument(
-        "--shared-phase-lag-high",
-        type=float,
-        default=None,
-        help="Upper physical bound for the single shared phase lag action.",
-    )
-    parser.add_argument(
-        "--phase-lag-lows",
-        type=lambda value: parse_float_list(value, 5, "phase-lag-lows"),
-        default=None,
-        help="Backward-compatible alias: uses the mean as shared-phase-lag-low.",
-    )
-    parser.add_argument(
-        "--phase-lag-highs",
-        type=lambda value: parse_float_list(value, 5, "phase-lag-highs"),
-        default=None,
-        help="Backward-compatible alias: uses the mean as shared-phase-lag-high.",
-    )
+    parser.add_argument("--phase-lag-lows", type=lambda value: parse_float_list(value, 5, "phase-lag-lows"), default=None)
+    parser.add_argument("--phase-lag-highs", type=lambda value: parse_float_list(value, 5, "phase-lag-highs"), default=None)
     parser.add_argument("--lateral-velocity-weight", type=float, default=None)
     parser.add_argument("--lateral-position-weight", type=float, default=None)
     parser.add_argument("--yaw-weight", type=float, default=None)
     parser.add_argument("--yaw-rate-weight", type=float, default=None)
     parser.add_argument("--energy-weight", type=float, default=None)
     parser.add_argument("--smoothness-weight", type=float, default=None)
-    parser.add_argument("--learning-rate", type=float, default=1e-4)
-    parser.add_argument("--ent-coef", type=float, default=0.005)
-    parser.add_argument(
-        "--log-std-init",
-        type=float,
-        default=None,
-        help="Initial log standard deviation for PPO continuous actions. Example: -2 gives std≈0.135.",
-    )
-    parser.add_argument("--n-steps", type=int, default=1024)
-    parser.add_argument("--batch-size", type=int, default=256)
-    parser.add_argument("--gamma", type=float, default=0.98)
     parser.add_argument("--eval-freq", type=int, default=10_000, help="Evaluate every N training steps. Use 0 to disable.")
     parser.add_argument("--eval-episodes", type=int, default=5, help="Episodes per evaluation.")
     parser.add_argument("--eval-log-dir", type=Path, default=None, help="Directory for evaluations.npz.")
@@ -96,20 +63,10 @@ def config_from_args(args) -> FreeSwimConfig:
         cfg.amp_scale_lows = args.amp_scale_lows
     if args.amp_scale_highs is not None:
         cfg.amp_scale_highs = args.amp_scale_highs
-
-    if args.shared_phase_lag_low is not None:
-        cfg.shared_phase_lag_low = float(args.shared_phase_lag_low)
-    elif args.phase_lag_lows is not None:
-        cfg.shared_phase_lag_low = float(sum(args.phase_lag_lows) / len(args.phase_lag_lows))
-
-    if args.shared_phase_lag_high is not None:
-        cfg.shared_phase_lag_high = float(args.shared_phase_lag_high)
-    elif args.phase_lag_highs is not None:
-        cfg.shared_phase_lag_high = float(sum(args.phase_lag_highs) / len(args.phase_lag_highs))
-
-    if cfg.shared_phase_lag_low > cfg.shared_phase_lag_high:
-        raise ValueError("shared phase lag low cannot be greater than high")
-
+    if args.phase_lag_lows is not None:
+        cfg.phase_lag_lows = args.phase_lag_lows
+    if args.phase_lag_highs is not None:
+        cfg.phase_lag_highs = args.phase_lag_highs
     if args.lateral_velocity_weight is not None:
         cfg.lateral_velocity_weight = args.lateral_velocity_weight
     if args.lateral_position_weight is not None:
@@ -151,19 +108,15 @@ def main():
     env = Monitor(EelFreeSwimRLEnv(cfg))
     callback, eval_log_dir, plot_output = make_eval_callback(args, cfg)
     if args.load_model is None:
-        policy_kwargs = {}
-        if args.log_std_init is not None:
-            policy_kwargs["log_std_init"] = args.log_std_init
         model = PPO(
             "MlpPolicy",
             env,
             verbose=1,
-            n_steps=args.n_steps,
-            batch_size=args.batch_size,
-            gamma=args.gamma,
-            learning_rate=args.learning_rate,
-            ent_coef=args.ent_coef,
-            policy_kwargs=policy_kwargs or None,
+            n_steps=1024,
+            batch_size=256,
+            gamma=0.98,
+            learning_rate=1e-4,
+            ent_coef=0.005,
         )
         reset_num_timesteps = True
     else:
