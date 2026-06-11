@@ -45,6 +45,12 @@ For PPO/RL training, also install:
 python -m pip install gymnasium stable-baselines3
 ```
 
+For detailed RL training, export, parameter, and GUI-testing commands, see:
+
+```text
+mujoco_simulation/RL_GAIT_TRAINING_GUIDE.md
+```
+
 Open the gait GUI:
 
 ```powershell
