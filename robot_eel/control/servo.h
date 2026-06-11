@@ -26,6 +26,16 @@ void servoTask(void *pv)
     {
       float t = millis() / 1000.0f;
 
+      // Python-equivalent CPG stepping must update all oscillators from the same
+      // old_r / old_theta snapshot. Do it once per servo frame, before reading
+      // getCPGOutput(j) for each joint.
+      if (controlMode == MODE_CPG)
+      {
+        float fb_phase = 0.0f;
+        float fb_amp   = 0.0f;
+        updateCPGAll(t, dt, fb_phase, fb_amp);
+      }
+
       /* ========= 1. 計算 target 並輸出 MOVE ========= */
       for (int j = 0; j < bodyNum; j++)
       {
@@ -47,9 +57,6 @@ void servoTask(void *pv)
 
           case MODE_CPG:
           {
-            float fb_phase = 0, fb_amp = 0;
-            updateCPG(t, dt, j, fb_phase, fb_amp);
-
             float outDeg = getCPGOutput(j);
             targetDeg = servoDefaultAngles[j] + outDeg;
           }
