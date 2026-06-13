@@ -32,7 +32,7 @@ class HopfCPGParams:
     mu: float = 1.0
     mu_scales: tuple[float, ...] | None = None
     k_couple: float = 0.35
-    k_anchor: float = 0.10
+    k_anchor: float = 0.0
     k_fb_phase: float = 0.8
     k_fb_amp: float = 0.25
     fb_phase: float = 0.0

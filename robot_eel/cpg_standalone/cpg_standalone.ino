@@ -54,10 +54,8 @@ void loop() {
     float dt = (now - lastUpdateMs) / 1000.0f;
     lastUpdateMs = now;
 
-    float t = now / 1000.0f;
-
     // No sensor feedback in standalone test.
-    updateCPGAll(t, dt, 0.0f, 0.0f);
+    updateCPGAll(dt);
 
     for (int j = 0; j < bodyNum; j++) {
       float outDeg = getCPGOutput(j);

@@ -1,0 +1,90 @@
+{
+  "name": "best_model_right_yaw0p6_best-step",
+  "ajoint": 15.0,
+  "freq": 1.0,
+  "wavelength": 1.6275,
+  "amp_scales": [
+    1.225,
+    1.075,
+    1.0,
+    1.075,
+    1.15,
+    1.225
+  ],
+  "phase_lags": [
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439
+  ],
+  "joint_bias": [
+    -0.154541,
+    -0.247995,
+    -0.142418,
+    -0.128717,
+    -0.049682,
+    0.040748
+  ],
+  "source": {
+    "type": "ppo_turning_policy_export_bias_only_compatible",
+    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\ppo_turn_right_gui_eval\\best_model\\best_model.zip",
+    "strategy": "best-step",
+    "turn_direction": "right",
+    "target_yaw_rate": -0.6,
+    "target_radius": null,
+    "deterministic": true,
+    "steady_state_samples": 300,
+    "episodes_used": 1,
+    "env_config": {
+      "xml_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\eel.xml",
+      "episode_seconds": 10.0,
+      "warmup_seconds": 2.0,
+      "control_dt": 0.02,
+      "fixed_frequency": 1.0,
+      "fixed_wavelength": 1.6275,
+      "fixed_ajoint": 0.2617993877991494,
+      "turn_direction": "right",
+      "target_yaw_rate": 0.6,
+      "target_radius": null,
+      "normalized_actions": true,
+      "fixed_amp_scales": [
+        1.225,
+        1.075,
+        1.0,
+        1.075,
+        1.15,
+        1.225
+      ],
+      "fixed_phase_lags": [
+        0.614439,
+        0.614439,
+        0.614439,
+        0.614439,
+        0.614439
+      ],
+      "joint_bias_low": -0.3,
+      "joint_bias_high": 0.3,
+      "reward_average_seconds": 0.6,
+      "speed_weight": 0.6,
+      "yaw_rate_weight": 1.2,
+      "radius_weight": 0.5,
+      "turn_direction_weight": 0.3,
+      "lateral_speed_weight": 0.05,
+      "energy_weight": 0.02,
+      "smoothness_weight": 0.02,
+      "bias_smoothness_weight": 0.02,
+      "boundary_x_min": -0.225,
+      "boundary_x_max": 3.225,
+      "boundary_y": 0.9
+    },
+    "metrics_mean": {
+      "reward": -0.674091,
+      "reward_best": -0.090532,
+      "speed": 0.152667,
+      "yaw_rate": -0.038257,
+      "turn_radius": 1.095014,
+      "energy_proxy": 0.051367
+    }
+  }
+}

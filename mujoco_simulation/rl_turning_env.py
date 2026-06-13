@@ -55,7 +55,7 @@ class TurningConfig:
     reward_average_seconds: float = 0.6
     speed_weight: float = 0.60
     yaw_rate_weight: float = 1.20
-    radius_weight: float = 0.00
+    radius_weight: float = 0.5
     turn_direction_weight: float = 0.30
     lateral_speed_weight: float = 0.05
     energy_weight: float = 0.02
@@ -206,14 +206,14 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         reward = 0.0
         if steady_state:
             reward = (
-                reward_speed
+                # reward_speed
                 + reward_yaw_rate
-                + reward_radius
-                + reward_direction
-                + reward_lateral_speed
-                + reward_energy
-                + reward_smooth
-                + reward_bias_smooth
+                #+ reward_radius
+                # + reward_direction
+                # + reward_lateral_speed
+                # + reward_energy
+                # + reward_smooth
+                # + reward_bias_smooth
             )
 
         out_of_bounds = (

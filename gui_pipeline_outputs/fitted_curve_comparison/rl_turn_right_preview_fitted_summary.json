@@ -1,0 +1,21 @@
+{
+  "name": "rl_turn_right_preview",
+  "kind": "circle",
+  "radius": 0.3782406050262037,
+  "rmse": 0.03248312890788943,
+  "arc_deg": 106.05595264346738,
+  "duration_s": 5.972000000000329,
+  "path_distance_m": 1.2232253004420444,
+  "straight_distance_m": 0.6514675096024072,
+  "mean_speed_m_s": 0.20482674153415556,
+  "forward_displacement_m": 0.21896708360638983,
+  "mean_forward_speed_m_s": 0.03666562016181811,
+  "lateral_drift_m": 0.6135660782380938,
+  "gait_name_in_json": "rl_turn_right_preview",
+  "source_gait_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\rl_gaits\\rl_turn_right_preview.json",
+  "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\rl_turn_right_preview_trajectory.csv",
+  "trajectory_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\rl_turn_right_preview_trajectory.png",
+  "trajectory_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\rl_turn_right_preview_summary.json",
+  "fit_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fitted_curve_comparison\\sim_rl_turn_right_preview_fitted_rotated.png",
+  "hit_wall": true
+}

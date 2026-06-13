@@ -47,11 +47,8 @@ inline float getCPGOutput(int j) {
 inline float getLambdaInput() { return fmaxf(lambda * L, 1e-6f); }
 inline float getTargetDelta() { return 1.0f / getLambdaInput(); }
 
-inline void updateCPGAll(float t, float dt, float fb_phase, float fb_amp) {
+inline void updateCPGAll(float dt) {
   const float K_couple   = 0.35f;
-  const float K_anchor   = 0.10f;
-  const float k_fb_phase = 0.8f;
-  const float k_fb_amp   = 0.25f;
 
   float omega = 2.0f * M_PI * frequency;
 
@@ -90,15 +87,6 @@ inline void updateCPGAll(float t, float dt, float fb_phase, float fb_amp) {
       float errR = wrap_pi((oldTheta[j + 1] - oldTheta[j]) - desiredR);
       dtheta[j] += K_couple * sinf(errR);
     }
-
-    float th_ref = omega * t + phaseOffsets[j];
-    float e_ref = wrap_pi(th_ref - oldTheta[j]);
-    dtheta[j] += K_anchor * sinf(e_ref);
-  }
-
-  for (int j = 0; j < bodyNum; j++) {
-    dtheta[j] += k_fb_phase * fb_phase;
-    dr[j]     += k_fb_amp   * fb_amp;
   }
 
   for (int j = 0; j < bodyNum; j++) {
@@ -109,7 +97,6 @@ inline void updateCPGAll(float t, float dt, float fb_phase, float fb_amp) {
 }
 
 // Backward-compatible single-joint updater. Prefer updateCPGAll() for CPG mode.
-inline void updateCPG(float t, float dt, int j, float fb_phase, float fb_amp) {
-  (void)j;
-  updateCPGAll(t, dt, fb_phase, fb_amp);
+inline void updateCPG(float dt) {
+  updateCPGAll(dt);
 }

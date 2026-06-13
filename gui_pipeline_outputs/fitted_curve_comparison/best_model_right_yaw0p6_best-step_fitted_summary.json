@@ -1,0 +1,21 @@
+{
+  "name": "best_model_right_yaw0p6_best-step",
+  "kind": "circle",
+  "radius": 0.492063487429194,
+  "rmse": 0.02970872306959028,
+  "arc_deg": 90.3831794535888,
+  "duration_s": 6.7830000000006,
+  "path_distance_m": 1.4028170934151034,
+  "straight_distance_m": 0.7289125317154298,
+  "mean_speed_m_s": 0.20681366554842687,
+  "forward_displacement_m": 0.37761600629177583,
+  "mean_forward_speed_m_s": 0.05567094298861012,
+  "lateral_drift_m": 0.6234738412187371,
+  "gait_name_in_json": "best_model_right_yaw0p6_best-step",
+  "source_gait_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\rl_gaits\\best_model_right_yaw0p6_best-step.json",
+  "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\best_model_right_yaw0p6_best-step_trajectory.csv",
+  "trajectory_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\best_model_right_yaw0p6_best-step_trajectory.png",
+  "trajectory_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fixed_gait_trajectories_3x1_5\\best_model_right_yaw0p6_best-step_summary.json",
+  "fit_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\gui_pipeline_outputs\\fitted_curve_comparison\\sim_best_model_right_yaw0p6_best-step_fitted_rotated.png",
+  "hit_wall": true
+}
