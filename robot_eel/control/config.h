@@ -44,8 +44,6 @@ extern float phaseLags[bodyNum - 1];
 extern float jointBiasDeg[bodyNum];
 extern bool  isPaused;
 extern int   controlMode;
-extern bool  useFeedback;
-extern float feedbackGain;
 // =====================================================
 // CPG state
 // =====================================================

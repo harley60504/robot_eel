@@ -14,12 +14,18 @@ def model_output_stem(output_path: Path) -> str:
 
 def default_eval_log_dir(output_path: Path) -> Path:
     output_path = Path(output_path)
-    return output_path.parent / f"{model_output_stem(output_path)}_eval"
+    parent = output_path.parent
+    if parent.name == "zips":
+        parent = parent.parent / "csv_png"
+    return parent / f"{model_output_stem(output_path)}_eval"
 
 
 def default_plot_path(output_path: Path) -> Path:
     output_path = Path(output_path)
-    return output_path.parent / f"{model_output_stem(output_path)}_eval_reward.png"
+    parent = output_path.parent
+    if parent.name == "zips":
+        parent = parent.parent / "csv_png"
+    return parent / f"{model_output_stem(output_path)}_eval_reward.png"
 
 
 def evaluation_file(eval_log_dir: Path) -> Path:

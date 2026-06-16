@@ -18,15 +18,19 @@ def parse_args():
     parser = argparse.ArgumentParser(
         description="Export a trained turning PPO policy as a fixed Hopf CPG turning gait JSON."
     )
-    parser.add_argument("--model", type=Path, default=Path("outputs/ppo_turn_left_shape_bias.zip"))
-    parser.add_argument("--output", type=Path, default=Path("gaits/rl_turn_left.json"))
+    parser.add_argument("--model", type=Path, default=Path("outputs/zips/ppo_turn_left_shape_bias.zip"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/json/rl_gaits/rl_turn_left.json"))
     parser.add_argument("--name", default=None, help="Name stored in the gait JSON. Default derives from turn direction.")
     parser.add_argument("--turn-direction", choices=("left", "right"), default="left")
     parser.add_argument("--target-yaw-rate", type=float, default=0.45, help="Target absolute yaw rate in rad/s.")
     parser.add_argument("--target-radius", type=float, default=None, help="Optional target absolute turn radius in meters.")
     parser.add_argument("--samples", type=int, default=300)
     parser.add_argument("--max-episodes", type=int, default=20)
-    parser.add_argument("--strategy", choices=("mean", "last", "best-step"), default="mean")
+    parser.add_argument(
+        "--strategy",
+        choices=("mean", "last", "best-step", "top-5%", "top-10%", "top-20%"),
+        default="mean",
+    )
     parser.add_argument("--stochastic", action="store_true")
     parser.add_argument("--round", type=int, default=6)
 
@@ -41,6 +45,9 @@ def parse_args():
     parser.add_argument("--phase-lag-highs", type=lambda value: parse_float_list(value, 5, "phase-lag-highs"), default=None)
     parser.add_argument("--joint-bias-low", type=float, default=None)
     parser.add_argument("--joint-bias-high", type=float, default=None)
+    parser.add_argument("--boundary-x-min", type=float, default=None)
+    parser.add_argument("--boundary-x-max", type=float, default=None)
+    parser.add_argument("--boundary-y", type=float, default=None)
     return parser.parse_args()
 
 
@@ -73,6 +80,12 @@ def config_from_args(args) -> TurningConfig:
         cfg.joint_bias_low = args.joint_bias_low
     if args.joint_bias_high is not None:
         cfg.joint_bias_high = args.joint_bias_high
+    if args.boundary_x_min is not None:
+        cfg.boundary_x_min = args.boundary_x_min
+    if args.boundary_x_max is not None:
+        cfg.boundary_x_max = args.boundary_x_max
+    if args.boundary_y is not None:
+        cfg.boundary_y = abs(args.boundary_y)
     direction_sign(cfg.turn_direction)
     return cfg
 
@@ -88,6 +101,18 @@ def summarize_metric(rows: list[dict[str, Any]], key: str) -> float | None:
     return float(np.mean(values))
 
 
+def _top_k_fraction(strategy: str) -> float | None:
+    if not strategy.startswith("top-") or not strategy.endswith("%"):
+        return None
+    try:
+        percent = float(strategy.removeprefix("top-").removesuffix("%"))
+    except ValueError:
+        return None
+    if percent <= 0.0 or percent > 100.0:
+        raise ValueError("top-k mean strategy percent must be > 0 and <= 100")
+    return percent / 100.0
+
+
 def select_action(actions: np.ndarray, rewards: np.ndarray, strategy: str) -> np.ndarray:
     if strategy == "mean":
         return np.mean(actions, axis=0)
@@ -95,7 +120,51 @@ def select_action(actions: np.ndarray, rewards: np.ndarray, strategy: str) -> np
         return actions[-1]
     if strategy == "best-step":
         return actions[int(np.argmax(rewards))]
+    top_fraction = _top_k_fraction(strategy)
+    if top_fraction is not None:
+        count = max(1, int(np.ceil(len(rewards) * top_fraction)))
+        top_indices = np.argsort(rewards)[-count:]
+        return np.mean(actions[top_indices], axis=0)
     raise ValueError(f"unknown export strategy: {strategy}")
+
+
+def selected_action_summary(rewards: np.ndarray, strategy: str) -> dict[str, float | int]:
+    if strategy == "mean":
+        count = len(rewards)
+        selected_rewards = rewards
+    elif strategy == "last":
+        count = 1
+        selected_rewards = rewards[-1:]
+    elif strategy == "best-step":
+        count = 1
+        selected_rewards = rewards[[int(np.argmax(rewards))]]
+    else:
+        top_fraction = _top_k_fraction(strategy)
+        if top_fraction is None:
+            raise ValueError(f"unknown export strategy: {strategy}")
+        count = max(1, int(np.ceil(len(rewards) * top_fraction)))
+        selected_rewards = rewards[np.argsort(rewards)[-count:]]
+    return {
+        "selected_action_count": int(count),
+        "selected_reward_mean": float(np.mean(selected_rewards)),
+        "selected_reward_min": float(np.min(selected_rewards)),
+        "selected_reward_max": float(np.max(selected_rewards)),
+    }
+
+
+def split_policy_action(selected: np.ndarray, cfg: TurningConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    selected = np.asarray(selected, dtype=np.float64)
+    if selected.shape[0] == 6:
+        return (
+            np.asarray(cfg.fixed_amp_scales, dtype=np.float64),
+            np.asarray(cfg.fixed_phase_lags, dtype=np.float64),
+            selected[:6],
+        )
+    if selected.shape[0] >= 17:
+        return selected[:6], selected[6:11], selected[11:17]
+    raise ValueError(
+        f"unsupported policy action size {selected.shape[0]}; expected 6 for bias-only or 17 for shape+bias"
+    )
 
 
 def main():
@@ -140,10 +209,9 @@ def main():
     actions = np.asarray(collected_actions, dtype=np.float64)
     rewards = np.asarray(collected_rewards, dtype=np.float64)
     selected = select_action(actions, rewards, args.strategy)
+    selection_summary = selected_action_summary(rewards, args.strategy)
 
-    amp_scales = selected[:6]
-    phase_lags = selected[6:11]
-    joint_bias = selected[11:17]
+    amp_scales, phase_lags, joint_bias = split_policy_action(selected, cfg)
     name = args.name or f"rl_turn_{args.turn_direction}"
 
     gait = {
@@ -158,6 +226,10 @@ def main():
             "type": "ppo_turning_policy_export",
             "model": str(args.model),
             "strategy": args.strategy,
+            "strategy_selection": {
+                key: round(value, args.round) if isinstance(value, float) else value
+                for key, value in selection_summary.items()
+            },
             "turn_direction": args.turn_direction,
             "target_yaw_rate": round(float(env.signed_target_yaw_rate), args.round),
             "target_radius": cfg.target_radius,
@@ -170,10 +242,15 @@ def main():
             },
             "metrics_mean": {
                 "reward": round(float(np.mean(rewards)), args.round),
+                "step_reward_best": round(float(np.max(rewards)), args.round),
                 "speed": round(summarize_metric(collected_infos, "speed") or 0.0, args.round),
+                "body_speed": round(summarize_metric(collected_infos, "body_speed") or 0.0, args.round),
                 "yaw_rate": round(summarize_metric(collected_infos, "yaw_rate") or 0.0, args.round),
+                "body_yaw_rate": round(summarize_metric(collected_infos, "body_yaw_rate") or 0.0, args.round),
                 "turn_radius": round(summarize_metric(collected_infos, "turn_radius") or 0.0, args.round),
-                "energy_proxy": round(summarize_metric(collected_infos, "energy_proxy") or 0.0, args.round),
+                "signed_turn_radius": round(summarize_metric(collected_infos, "signed_turn_radius") or 0.0, args.round),
+                "signed_target_radius": round(summarize_metric(collected_infos, "signed_target_radius") or 0.0, args.round),
+                "correct_turn_direction_rate": round(summarize_metric(collected_infos, "correct_turn_direction") or 0.0, args.round),
             },
         },
     }

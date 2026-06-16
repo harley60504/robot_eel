@@ -110,12 +110,6 @@ SIN_BASE = 0.0
 SIN_AMP = AJOINT_DEG
 SIN_FREQ = FREQUENCY_HZ
 
-# =============================
-# CPG Params
-# =============================
-ONBOARD_FEEDBACK_GAIN = 1.0
-
-
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
@@ -212,6 +206,5 @@ def generate_cpg_params(t, dt):
         "phaseLags": [round(value, 6) for value in gait.phase_lags],
         "jointBiasDeg": [round(value, 6) for value in gait.joint_bias_deg],
         "paused": False,
-        "feedback": round(ONBOARD_FEEDBACK_GAIN, 4),
     }
     return payload

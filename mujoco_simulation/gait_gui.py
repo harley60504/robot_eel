@@ -12,6 +12,7 @@ from tkinter import messagebox, ttk
 ROOT = Path(__file__).resolve().parent
 GAIT_DIRS = (
     ROOT / "gaits",
+    ROOT / "outputs" / "json" / "rl_gaits",
     ROOT / "outputs" / "rl_gaits",
 )
 REQUIRED_GAIT_FIELDS = ("ajoint", "freq", "wavelength", "amp_scales", "phase_lags", "joint_bias")
@@ -184,7 +185,7 @@ class GaitGui(tk.Tk):
 
         ttk.Label(
             left,
-            text="Reads: gaits/*.json and outputs/rl_gaits/*.json. RL gaits are listed first.",
+            text="Reads: gaits/*.json and outputs/json/rl_gaits/*.json. RL gaits are listed first.",
             foreground="#555555",
         ).pack(anchor=tk.W, pady=(0, 6))
 

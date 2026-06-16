@@ -22,7 +22,7 @@ def parse_float_list(value: str, expected_len: int, name: str) -> tuple[float, .
 def parse_args():
     parser = argparse.ArgumentParser(description="Train PPO on free-swim forward velocity.")
     parser.add_argument("--timesteps", type=int, default=100_000)
-    parser.add_argument("--output", type=Path, default=Path("outputs/ppo_free_swim_shape"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/zips/ppo_free_swim_shape"))
     parser.add_argument("--load-model", type=Path, default=None)
     parser.add_argument("--episode-seconds", type=float, default=None)
     parser.add_argument("--warmup-seconds", type=float, default=None)

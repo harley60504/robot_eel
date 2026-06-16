@@ -18,7 +18,7 @@ def parse_float_list(value: str, expected_len: int, name: str) -> tuple[float, .
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a trained tethered eel PPO policy.")
-    parser.add_argument("--model", type=Path, default=Path("outputs/ppo_hopf_tethered_eel.zip"))
+    parser.add_argument("--model", type=Path, default=Path("outputs/zips/ppo_hopf_tethered_eel.zip"))
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--freq-min", type=float, default=None)
     parser.add_argument("--freq-max", type=float, default=None)

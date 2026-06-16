@@ -30,6 +30,30 @@ def summarize_metric(rows: list[dict[str, Any]], key: str) -> float | None:
     return float(np.mean(values))
 
 
+def _top_k_fraction(strategy: str) -> float | None:
+    if not strategy.startswith("top-") or not strategy.endswith("%"):
+        return None
+    try:
+        percent = float(strategy.removeprefix("top-").removesuffix("%"))
+    except ValueError:
+        return None
+    if percent <= 0.0 or percent > 100.0:
+        raise ValueError("top-k mean strategy percent must be > 0 and <= 100")
+    return percent / 100.0
+
+
+def _filtered_mean_drop_fraction(strategy: str) -> float | None:
+    if not strategy.startswith("filtered-mean-") or not strategy.endswith("%"):
+        return None
+    try:
+        percent = float(strategy.removeprefix("filtered-mean-").removesuffix("%"))
+    except ValueError:
+        return None
+    if percent < 0.0 or percent >= 100.0:
+        raise ValueError("filtered mean drop percent must be >= 0 and < 100")
+    return percent / 100.0
+
+
 def select_action(actions: np.ndarray, rewards: np.ndarray, strategy: str) -> np.ndarray:
     if strategy == "mean":
         return np.mean(actions, axis=0)
@@ -37,7 +61,51 @@ def select_action(actions: np.ndarray, rewards: np.ndarray, strategy: str) -> np
         return actions[-1]
     if strategy == "best-step":
         return actions[int(np.argmax(rewards))]
+    top_fraction = _top_k_fraction(strategy)
+    if top_fraction is not None:
+        count = max(1, int(np.ceil(len(rewards) * top_fraction)))
+        top_indices = np.argsort(rewards)[-count:]
+        return np.mean(actions[top_indices], axis=0)
+    drop_fraction = _filtered_mean_drop_fraction(strategy)
+    if drop_fraction is not None:
+        cutoff = float(np.quantile(rewards, drop_fraction))
+        keep = rewards >= cutoff
+        if not np.any(keep):
+            return np.mean(actions, axis=0)
+        return np.mean(actions[keep], axis=0)
     raise ValueError(f"unknown export strategy: {strategy}")
+
+
+def selected_action_summary(rewards: np.ndarray, strategy: str) -> dict[str, Any]:
+    if strategy == "mean":
+        count = len(rewards)
+        selected_rewards = rewards
+    elif strategy == "last":
+        count = 1
+        selected_rewards = rewards[-1:]
+    elif strategy == "best-step":
+        count = 1
+        selected_rewards = rewards[[int(np.argmax(rewards))]]
+    else:
+        top_fraction = _top_k_fraction(strategy)
+        drop_fraction = _filtered_mean_drop_fraction(strategy)
+        if top_fraction is not None:
+            count = max(1, int(np.ceil(len(rewards) * top_fraction)))
+            selected_rewards = rewards[np.argsort(rewards)[-count:]]
+        elif drop_fraction is not None:
+            cutoff = float(np.quantile(rewards, drop_fraction))
+            selected_rewards = rewards[rewards >= cutoff]
+            if selected_rewards.size == 0:
+                selected_rewards = rewards
+            count = int(selected_rewards.size)
+        else:
+            raise ValueError(f"unknown export strategy: {strategy}")
+    return {
+        "selected_action_count": int(count),
+        "selected_reward_mean": float(np.mean(selected_rewards)),
+        "selected_reward_min": float(np.min(selected_rewards)),
+        "selected_reward_max": float(np.max(selected_rewards)),
+    }
 
 
 def _split_policy_action(selected: np.ndarray, cfg: TurningConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -120,16 +188,21 @@ def export_turning_policy_to_gait(
     actions = np.asarray(collected_actions, dtype=np.float64)
     rewards = np.asarray(collected_rewards, dtype=np.float64)
     selected = select_action(actions, rewards, strategy)
+    selection_summary = selected_action_summary(rewards, strategy)
     amp_scales, phase_lags, joint_bias = _split_policy_action(selected, cfg)
 
     gait_name = name or f"rl_turn_{cfg.turn_direction}_policy"
     metrics_mean = {
         "reward": round(float(np.mean(rewards)), digits),
-        "reward_best": round(float(np.max(rewards)), digits),
+        "step_reward_best": round(float(np.max(rewards)), digits),
         "speed": round(summarize_metric(collected_infos, "speed") or 0.0, digits),
+        "body_speed": round(summarize_metric(collected_infos, "body_speed") or 0.0, digits),
         "yaw_rate": round(summarize_metric(collected_infos, "yaw_rate") or 0.0, digits),
+        "body_yaw_rate": round(summarize_metric(collected_infos, "body_yaw_rate") or 0.0, digits),
         "turn_radius": round(summarize_metric(collected_infos, "turn_radius") or 0.0, digits),
-        "energy_proxy": round(summarize_metric(collected_infos, "energy_proxy") or 0.0, digits),
+        "signed_turn_radius": round(summarize_metric(collected_infos, "signed_turn_radius") or 0.0, digits),
+        "signed_target_radius": round(summarize_metric(collected_infos, "signed_target_radius") or 0.0, digits),
+        "correct_turn_direction_rate": round(summarize_metric(collected_infos, "correct_turn_direction") or 0.0, digits),
     }
 
     gait: dict[str, Any] = {
@@ -144,6 +217,10 @@ def export_turning_policy_to_gait(
             "type": "ppo_turning_policy_export_bias_only_compatible",
             "model": str(model_path),
             "strategy": strategy,
+            "strategy_selection": {
+                key: round(value, digits) if isinstance(value, float) else value
+                for key, value in selection_summary.items()
+            },
             "turn_direction": cfg.turn_direction,
             "target_yaw_rate": round(float(env.signed_target_yaw_rate), digits),
             "target_radius": cfg.target_radius,
@@ -160,6 +237,10 @@ def export_turning_policy_to_gait(
         "samples_collected": len(collected_actions),
         "episodes_used": episodes,
         "strategy": strategy,
+        "strategy_selection": {
+            key: round(value, digits) if isinstance(value, float) else value
+            for key, value in selection_summary.items()
+        },
         "metrics_mean": metrics_mean,
         "selected_action_size": int(selected.shape[0]),
     }

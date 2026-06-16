@@ -39,7 +39,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gait-dir",
         type=Path,
-        default=Path("outputs/rl_gaits"),
+        default=Path("outputs/json/rl_gaits"),
         help="Directory scanned when --gait is not provided.",
     )
     parser.add_argument("--pattern", default="*.json", help="Glob pattern used with --gait-dir.")

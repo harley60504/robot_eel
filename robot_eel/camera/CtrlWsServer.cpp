@@ -23,8 +23,6 @@ ControlPacket g_pkt = {
     {0, 0, 0, 0, 0, 0},
     false,
     2,
-    false,
-    1.0f,
     0
 };
 
@@ -94,7 +92,6 @@ void CtrlWsServer::tick()
     doc["L"]         = g_pkt.L;
     doc["paused"]    = g_pkt.isPaused;
     doc["mode"]      = g_pkt.controlMode;
-    doc["feedback"]  = g_pkt.feedbackGain;
     auto amps = doc.createNestedArray("ampScales");
     auto phases = doc.createNestedArray("phaseLags");
     auto biases = doc.createNestedArray("jointBiasDeg");
@@ -159,7 +156,6 @@ void CtrlWsServer::begin(WebSocketsServer &ws)
             if (doc.containsKey("L"))          g_pkt.L            = doc["L"];
             if (doc.containsKey("paused"))     g_pkt.isPaused     = doc["paused"];
             if (doc.containsKey("mode"))       g_pkt.controlMode  = doc["mode"];
-            if (doc.containsKey("feedback"))   g_pkt.feedbackGain = doc["feedback"];
             if (doc["ampScales"].is<JsonArray>()) {
                 JsonArray arr = doc["ampScales"].as<JsonArray>();
                 for (int i = 0; i < bodyNum && i < arr.size(); i++) {

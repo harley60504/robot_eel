@@ -12,7 +12,7 @@ from train_free_swim_rl import config_from_args, parse_float_list
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate a free-swim PPO policy.")
-    parser.add_argument("--model", type=Path, default=Path("outputs/ppo_free_swim_shape.zip"))
+    parser.add_argument("--model", type=Path, default=Path("outputs/zips/ppo_free_swim_shape.zip"))
     parser.add_argument("--episodes", type=int, default=5)
     parser.add_argument("--episode-seconds", type=float, default=None)
     parser.add_argument("--warmup-seconds", type=float, default=None)

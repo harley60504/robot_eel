@@ -22,7 +22,7 @@ def parse_args():
         description="Paper-style tethered force-target PPO: fixed frequency, fixed wavelength, CPG shape action."
     )
     parser.add_argument("--timesteps", type=int, default=50_000)
-    parser.add_argument("--output", type=Path, default=Path("outputs/ppo_paper_style_target"))
+    parser.add_argument("--output", type=Path, default=Path("outputs/zips/ppo_paper_style_target"))
     parser.add_argument("--target-force", type=float, default=4.8)
     parser.add_argument("--target-metric", choices=("fx", "resultant"), default="fx")
     parser.add_argument("--freq", type=float, default=1.0)

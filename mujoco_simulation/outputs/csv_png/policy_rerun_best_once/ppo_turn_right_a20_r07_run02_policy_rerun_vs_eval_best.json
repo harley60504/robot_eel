@@ -1,0 +1,35 @@
+{
+  "name": "ppo_turn_right_a20_r07_run02",
+  "policy_rerun_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\ppo_turn_right_a20_r07_run02_policy_rerun_summary.json",
+  "eval_best_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\ppo_turn_right_a20_r07_run02_eval_best_policy_summary.json",
+  "fitted_yaw_rate_rad_s": {
+    "rerun": -0.3035208851646189,
+    "eval_best": -0.3035208851646189,
+    "delta": 0.0
+  },
+  "radius": {
+    "rerun": 0.5688949388511824,
+    "eval_best": 0.5688949388511824,
+    "delta": 0.0
+  },
+  "fitted_radius_error_m": {
+    "rerun": 0.1311050611488176,
+    "eval_best": 0.1311050611488176,
+    "delta": 0.0
+  },
+  "arc_deg": {
+    "rerun": 173.55684782579388,
+    "eval_best": 173.55684782579388,
+    "delta": 0.0
+  },
+  "mean_env_yaw_rate": {
+    "rerun": -0.36786643784900586,
+    "eval_best": -0.36786643784900586,
+    "delta": 0.0
+  },
+  "mean_env_turn_radius": {
+    "rerun": 0.5384163501922987,
+    "eval_best": 0.5384163501922987,
+    "delta": 0.0
+  }
+}

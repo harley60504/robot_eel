@@ -120,9 +120,7 @@ void CtrlUartBridge::sendCtrlParams(const ControlPacket &pkt)
     pkt.phaseLags,
     pkt.jointBiasDeg,
     pkt.isPaused,
-    pkt.controlMode,
-    pkt.useFeedback,
-    pkt.feedbackGain
+    pkt.controlMode
   );
 }
 

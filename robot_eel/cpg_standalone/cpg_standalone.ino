@@ -56,17 +56,21 @@ void loop() {
 
     // No sensor feedback in standalone test.
     updateCPGAll(dt);
+    Serial.print(now);
+    Serial.print(",");
+    Serial.print(dt);
+    Serial.print("\n");
 
     for (int j = 0; j < bodyNum; j++) {
       float outDeg = getCPGOutput(j);
 
-      Serial.print(outDeg, 4);
+      // Serial.print(outDeg, 4);
 
-      if (j < bodyNum - 1) {
-        Serial.print(",");
-      } else {
-        Serial.println();
-      }
+      // if (j < bodyNum - 1) {
+      //   Serial.print(",");
+      // } else {
+      //   Serial.println();
+      // }
     }
   }
 }

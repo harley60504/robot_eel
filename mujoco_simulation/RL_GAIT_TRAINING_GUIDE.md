@@ -1,4 +1,4 @@
-# RL Gait Training Guide
+﻿# RL Gait Training Guide
 
 This guide collects the commands for training PPO gaits, exporting trained policies to gait JSON files, and checking the result in the MuJoCo GUI.
 
@@ -18,14 +18,14 @@ python -m pip install mujoco numpy matplotlib gymnasium stable-baselines3
 
 | Output | Meaning | Used by |
 |---|---|---|
-| `outputs/ppo_free_swim_shape.zip` | PPO model for straight free-swim shape tuning | `export_rl_gait_json.py` |
-| `outputs/ppo_turn_left_shape_bias.zip` | PPO model for left turning gait training | `export_turning_rl_gait_json.py` |
-| `outputs/ppo_turn_right_shape_bias.zip` | PPO model for right turning gait training | `export_turning_rl_gait_json.py` |
-| `outputs/rl_gaits/rl_straight.json` | fixed straight RL gait JSON | `gait_gui.py`, `view_gait.py` |
-| `outputs/rl_gaits/rl_turn_left.json` | fixed left-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
-| `outputs/rl_gaits/rl_turn_right.json` | fixed right-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
+| `outputs/zips/ppo_free_swim_shape.zip` | PPO model for straight free-swim shape tuning | `export_rl_gait_json.py` |
+| `outputs/zips/ppo_turn_left_shape_bias.zip` | PPO model for left turning gait training | `export_turning_rl_gait_json.py` |
+| `outputs/zips/ppo_turn_right_shape_bias.zip` | PPO model for right turning gait training | `export_turning_rl_gait_json.py` |
+| `outputs/json/rl_gaits/rl_straight.json` | fixed straight RL gait JSON | `gait_gui.py`, `view_gait.py` |
+| `outputs/json/rl_gaits/rl_turn_left.json` | fixed left-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
+| `outputs/json/rl_gaits/rl_turn_right.json` | fixed right-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
 
-`gait_gui.py` reads both `gaits/*.json` and `outputs/rl_gaits/*.json`. RL gaits are shown first in the Fixed Gait list.
+`gait_gui.py` reads both `gaits/*.json` and `outputs/json/rl_gaits/*.json`. RL gaits are shown first in the Fixed Gait list.
 
 ## 2. Straight free-swim PPO
 
@@ -40,19 +40,19 @@ It does not train `joint_bias`, so it is mainly for straight swimming.
 ### Train straight PPO
 
 ```powershell
-python train_free_swim_rl.py --timesteps 500000 --output outputs/ppo_free_swim_shape
+python train_free_swim_rl.py --timesteps 500000 --output outputs/zips/ppo_free_swim_shape
 ```
 
 ### Continue straight PPO training
 
 ```powershell
-python train_free_swim_rl.py --load-model outputs/ppo_free_swim_shape.zip --timesteps 300000 --output outputs/ppo_free_swim_shape
+python train_free_swim_rl.py --load-model outputs/zips/ppo_free_swim_shape.zip --timesteps 300000 --output outputs/zips/ppo_free_swim_shape
 ```
 
 ### Export straight PPO to gait JSON
 
 ```powershell
-python export_rl_gait_json.py --model outputs/ppo_free_swim_shape.zip --output outputs/rl_gaits/rl_straight.json
+python export_rl_gait_json.py --model outputs/zips/ppo_free_swim_shape.zip --output outputs/json/rl_gaits/rl_straight.json
 ```
 
 ### Open GUI and test
@@ -89,49 +89,49 @@ The turning reward encourages:
 ### Train left-turn PPO
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --timesteps 500000 --output outputs/ppo_turn_left_shape_bias
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --timesteps 500000 --output outputs/zips/ppo_turn_left_shape_bias
 ```
 
 ### Continue left-turn PPO training
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --load-model outputs/ppo_turn_left_shape_bias.zip --timesteps 300000 --output outputs/ppo_turn_left_shape_bias
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --load-model outputs/zips/ppo_turn_left_shape_bias.zip --timesteps 300000 --output outputs/zips/ppo_turn_left_shape_bias
 ```
 
 ### Export left-turn PPO to gait JSON
 
 ```powershell
-python export_turning_rl_gait_json.py --turn-direction left --target-yaw-rate 0.45 --model outputs/ppo_turn_left_shape_bias.zip --output outputs/rl_gaits/rl_turn_left.json
+python export_turning_rl_gait_json.py --turn-direction left --target-yaw-rate 0.45 --model outputs/zips/ppo_turn_left_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_left.json
 ```
 
 ### Measure left-turn gait
 
 ```powershell
-python measure_turning.py --gait outputs/rl_gaits/rl_turn_left.json
+python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_left.json
 ```
 
 ### Train right-turn PPO
 
 ```powershell
-python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --timesteps 500000 --output outputs/ppo_turn_right_shape_bias
+python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --timesteps 500000 --output outputs/zips/ppo_turn_right_shape_bias
 ```
 
 ### Continue right-turn PPO training
 
 ```powershell
-python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --load-model outputs/ppo_turn_right_shape_bias.zip --timesteps 300000 --output outputs/ppo_turn_right_shape_bias
+python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --load-model outputs/zips/ppo_turn_right_shape_bias.zip --timesteps 300000 --output outputs/zips/ppo_turn_right_shape_bias
 ```
 
 ### Export right-turn PPO to gait JSON
 
 ```powershell
-python export_turning_rl_gait_json.py --turn-direction right --target-yaw-rate 0.45 --model outputs/ppo_turn_right_shape_bias.zip --output outputs/rl_gaits/rl_turn_right.json
+python export_turning_rl_gait_json.py --turn-direction right --target-yaw-rate 0.45 --model outputs/zips/ppo_turn_right_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_right.json
 ```
 
 ### Measure right-turn gait
 
 ```powershell
-python measure_turning.py --gait outputs/rl_gaits/rl_turn_right.json
+python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_right.json
 ```
 
 ## 4. Common training parameters
@@ -141,7 +141,7 @@ These parameters can be used with `train_free_swim_rl.py` and `train_turning_rl.
 | Parameter | Meaning | Default / common value | What to change |
 |---|---|---|---|
 | `--timesteps` | Number of PPO training steps for this run | `100000` straight, `150000` turning default; recommended `300000~500000` | Increase if reward is still improving |
-| `--output` | Output model path without `.zip` | `outputs/ppo_*` | Change to keep multiple experiments |
+| `--output` | Output model path without `.zip` | `outputs/zips/ppo_*` | Change to keep multiple experiments |
 | `--load-model` | Existing `.zip` model to continue training | none | Use this to resume training |
 | `--episode-seconds` | Simulation seconds per episode | straight `8`, turning `10` | Longer episodes give more stable metrics but train slower |
 | `--warmup-seconds` | Seconds with no reward at episode start | `2` | Increase if CPG startup is unstable; decrease if collecting reward too late |
@@ -156,13 +156,13 @@ These parameters can be used with `train_free_swim_rl.py` and `train_turning_rl.
 Example of changing amplitude and frequency:
 
 ```powershell
-python train_free_swim_rl.py --freq 1.2 --ajoint 18 --timesteps 300000 --output outputs/ppo_free_swim_f12_a18
+python train_free_swim_rl.py --freq 1.2 --ajoint 18 --timesteps 300000 --output outputs/zips/ppo_free_swim_f12_a18
 ```
 
 Example of narrower action bounds:
 
 ```powershell
-python train_free_swim_rl.py --amp-scale-lows 1.10,0.95,0.90,0.95,1.00,1.05 --amp-scale-highs 1.30,1.15,1.10,1.15,1.25,1.35 --timesteps 300000 --output outputs/ppo_free_swim_narrow
+python train_free_swim_rl.py --amp-scale-lows 1.10,0.95,0.90,0.95,1.00,1.05 --amp-scale-highs 1.30,1.15,1.10,1.15,1.25,1.35 --timesteps 300000 --output outputs/zips/ppo_free_swim_narrow
 ```
 
 ## 5. Turning-only parameters
@@ -190,13 +190,13 @@ These parameters are for `train_turning_rl.py` and `export_turning_rl_gait_json.
 Wider and gentler turn:
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.30 --timesteps 500000 --output outputs/ppo_turn_left_yaw030
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.30 --timesteps 500000 --output outputs/zips/ppo_turn_left_yaw030
 ```
 
 Tighter and stronger turn:
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.65 --timesteps 500000 --output outputs/ppo_turn_left_yaw065
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.65 --timesteps 500000 --output outputs/zips/ppo_turn_left_yaw065
 ```
 
 If `--target-yaw-rate` is too high, the policy may learn unstable bias, hit boundaries, or lose forward motion.
@@ -206,13 +206,13 @@ If `--target-yaw-rate` is too high, the policy may learn unstable bias, hit boun
 Train left turn for about 0.8 m radius:
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --target-radius 0.8 --timesteps 500000 --output outputs/ppo_turn_left_r08
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --target-radius 0.8 --timesteps 500000 --output outputs/zips/ppo_turn_left_r08
 ```
 
 Export it:
 
 ```powershell
-python export_turning_rl_gait_json.py --turn-direction left --target-yaw-rate 0.45 --target-radius 0.8 --model outputs/ppo_turn_left_r08.zip --output outputs/rl_gaits/rl_turn_left_r08.json
+python export_turning_rl_gait_json.py --turn-direction left --target-yaw-rate 0.45 --target-radius 0.8 --model outputs/zips/ppo_turn_left_r08.zip --output outputs/json/rl_gaits/rl_turn_left_r08.json
 ```
 
 ## 6. Export parameters
@@ -221,8 +221,8 @@ These parameters are for `export_rl_gait_json.py` and `export_turning_rl_gait_js
 
 | Parameter | Meaning | Default / common value | What to change |
 |---|---|---|---|
-| `--model` | Trained PPO `.zip` file | `outputs/ppo_*.zip` | Must match the model you trained |
-| `--output` | Output gait JSON path | `outputs/rl_gaits/*.json` | Change name to keep multiple versions |
+| `--model` | Trained PPO `.zip` file | `outputs/zips/ppo_*.zip` | Must match the model you trained |
+| `--output` | Output gait JSON path | `outputs/json/rl_gaits/*.json` | Change name to keep multiple versions |
 | `--name` | Name stored inside the JSON | derived from file/direction | Change for GUI display |
 | `--samples` | Number of steady-state actions collected before export | `300` | Increase for smoother average |
 | `--max-episodes` | Maximum rollout episodes during export | `20` | Increase if export cannot collect enough samples |
@@ -233,13 +233,13 @@ These parameters are for `export_rl_gait_json.py` and `export_turning_rl_gait_js
 Recommended export strategy:
 
 ```powershell
-python export_turning_rl_gait_json.py --turn-direction left --model outputs/ppo_turn_left_shape_bias.zip --output outputs/rl_gaits/rl_turn_left.json --strategy mean --samples 300
+python export_turning_rl_gait_json.py --turn-direction left --model outputs/zips/ppo_turn_left_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_left.json --strategy mean --samples 300
 ```
 
 If the averaged gait becomes too weak, try:
 
 ```powershell
-python export_turning_rl_gait_json.py --turn-direction left --model outputs/ppo_turn_left_shape_bias.zip --output outputs/rl_gaits/rl_turn_left_best.json --strategy best-step
+python export_turning_rl_gait_json.py --turn-direction left --model outputs/zips/ppo_turn_left_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_left_best.json --strategy best-step
 ```
 
 ## 7. How to judge whether training is healthy
@@ -262,22 +262,22 @@ Do not judge PPO only from `train/loss`. PPO loss can move up and down and still
 For straight gait:
 
 ```powershell
-python train_free_swim_rl.py --timesteps 500000 --output outputs/ppo_free_swim_shape
-python export_rl_gait_json.py --model outputs/ppo_free_swim_shape.zip --output outputs/rl_gaits/rl_straight.json
+python train_free_swim_rl.py --timesteps 500000 --output outputs/zips/ppo_free_swim_shape
+python export_rl_gait_json.py --model outputs/zips/ppo_free_swim_shape.zip --output outputs/json/rl_gaits/rl_straight.json
 python gait_gui.py
 ```
 
 For left and right turning gaits:
 
 ```powershell
-python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --timesteps 500000 --output outputs/ppo_turn_left_shape_bias
-python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --timesteps 500000 --output outputs/ppo_turn_right_shape_bias
+python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --timesteps 500000 --output outputs/zips/ppo_turn_left_shape_bias
+python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --timesteps 500000 --output outputs/zips/ppo_turn_right_shape_bias
 
-python export_turning_rl_gait_json.py --turn-direction left --model outputs/ppo_turn_left_shape_bias.zip --output outputs/rl_gaits/rl_turn_left.json
-python export_turning_rl_gait_json.py --turn-direction right --model outputs/ppo_turn_right_shape_bias.zip --output outputs/rl_gaits/rl_turn_right.json
+python export_turning_rl_gait_json.py --turn-direction left --model outputs/zips/ppo_turn_left_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_left.json
+python export_turning_rl_gait_json.py --turn-direction right --model outputs/zips/ppo_turn_right_shape_bias.zip --output outputs/json/rl_gaits/rl_turn_right.json
 
-python measure_turning.py --gait outputs/rl_gaits/rl_turn_left.json
-python measure_turning.py --gait outputs/rl_gaits/rl_turn_right.json
+python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_left.json
+python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_right.json
 python gait_gui.py
 ```
 
@@ -292,3 +292,4 @@ Avoid changing these until the basic workflow works:
 - Very large `joint_bias` bounds such as `-0.8~0.8`.
 
 Change one group of parameters at a time, then export and measure the resulting JSON.
+

@@ -50,8 +50,6 @@ float jointBiasDeg[bodyNum] = {0, 0, 0, 0, 0, 0};
 
 bool  isPaused     = false;
 int   controlMode  = 2;
-bool  useFeedback  = false;
-float feedbackGain = 1.0f;
 
 // ==========================
 HopfOscillator cpg[bodyNum];
@@ -95,9 +93,7 @@ void cameraTxTask(void* pv)
       phaseLags,
       jointBiasDeg,
       isPaused,
-      (uint8_t)controlMode,
-      useFeedback,
-      feedbackGain
+      (uint8_t)controlMode
     );
 
     vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(100));   // 10Hz
@@ -188,14 +184,10 @@ void cameraRxTask(void* pv)
             initCPG();
           }
 
-          useFeedback  = pkt.useFeedback;
-          feedbackGain = pkt.feedbackGain;
-
           Serial.println("==== UART ← Camera (ControlPacket) ====");
-          Serial.printf("mode=%d pause=%d A=%.2f f=%.2f lambda=%.2f L=%.2f fb=%d gain=%.2f\n",
+          Serial.printf("mode=%d pause=%d A=%.2f f=%.2f lambda=%.2f L=%.2f\n",
                         controlMode, (int)isPaused,
-                        Ajoint, frequency, lambda, L,
-                        (int)useFeedback, feedbackGain);
+                        Ajoint, frequency, lambda, L);
         }
 
         // ✅ 已在 Control 狀態下，這個 byte 不要再給其他 parser

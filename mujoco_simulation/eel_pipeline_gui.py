@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -15,8 +16,10 @@ import numpy as np
 
 from hopf_cpg import DEFAULT_AJOINT_DEG, degrees_to_radians
 from make_tracked_center_cleaned_physical import DEFAULT_PREVIEW_NAME, DEFAULT_PX_PER_M, process_video
-from plot_fixed_gait_trajectories import draw_environment, plot_one, run_gait, summarize
+from plot_fixed_gait_trajectories import draw_environment, extract_gait_target_info, plot_one, run_gait, summarize
 from plot_fitted_gait_curves import (
+    add_fitted_radius_metrics,
+    add_fitted_yaw_rate_metrics,
     add_sim_metric_box,
     draw_rotated_tank,
     fitted_curve,
@@ -24,17 +27,23 @@ from plot_fitted_gait_curves import (
     sim_metric_text,
     trajectory_metrics,
 )
-from rl_policy_exporter import export_turning_policy_to_gait, write_gait_json
 from rl_turning_env import TurningConfig
 from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML
+from plot_turning_policy_rollout_curves import write_rollout_outputs
+from policy_rerun_fixed_gait import write_mean_fixed_gait_from_best_policy
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-DEFAULT_PIPELINE_ROOT = SCRIPT_DIR.parent / "gui_pipeline_outputs"
 REAL_SUBDIR = "real_video_analysis"
-SIM_SUBDIR = "fixed_gait_trajectories_3x1_5"
-FIT_SUBDIR = "fitted_curve_comparison"
-RL_GAIT_DIR = SCRIPT_DIR / "outputs" / "rl_gaits"
+SIM_SUBDIR = "fixed_gait_trajectories_mean"
+FIT_SUBDIR = "fitted_curve_comparison_mean"
+POLICY_ROLLOUT_SUBDIR = "policy_rerun_best_once"
+OUTPUTS_DIR = SCRIPT_DIR / "outputs"
+DEFAULT_PIPELINE_ROOT = OUTPUTS_DIR
+ZIP_DIR = OUTPUTS_DIR / "zips"
+CSV_PNG_DIR = OUTPUTS_DIR / "csv_png"
+JSON_DIR = OUTPUTS_DIR / "json"
+RL_GAIT_DIR = JSON_DIR / "rl_gaits"
 
 
 class TextLogger:
@@ -78,12 +87,18 @@ class EelPipelineGui:
         self.rl_output_json_var = tk.StringVar(value=str(RL_GAIT_DIR / "rl_turn_right_preview.json"))
         self.rl_turn_direction_var = tk.StringVar(value="right")
         self.rl_target_yaw_rate_var = tk.StringVar(value="0.45")
-        self.rl_target_radius_var = tk.StringVar(value="")
-        self.rl_strategy_var = tk.StringVar(value="best-step")
+        self.rl_target_radius_var = tk.StringVar(value="0.4")
+        self.rl_use_yaw_reward_var = tk.BooleanVar(value=True)
+        self.rl_use_radius_reward_var = tk.BooleanVar(value=True)
+        self.rl_yaw_reward_weight_var = tk.StringVar(value="1.20")
+        self.rl_radius_reward_weight_var = tk.StringVar(value="1.20")
+        self.rl_run_name_var = tk.StringVar(value="ppo_turn_right_gui")
+        self.rl_run_count_var = tk.StringVar(value="1")
+        self.rl_strategy_var = tk.StringVar(value="policy-rerun-mean")
         self.rl_samples_var = tk.StringVar(value="300")
         self.rl_max_episodes_var = tk.StringVar(value="20")
         self.rl_train_timesteps_var = tk.StringVar(value="200000")
-        self.rl_train_output_var = tk.StringVar(value=str(SCRIPT_DIR / "outputs" / "ppo_turn_right_gui"))
+        self.rl_train_output_var = tk.StringVar(value=str(ZIP_DIR / "ppo_turn_right_gui"))
         self.rl_load_model_var = tk.StringVar(value="")
         self.rl_eval_freq_var = tk.StringVar(value="10000")
         self.rl_freq_var = tk.StringVar(value="")
@@ -91,12 +106,19 @@ class EelPipelineGui:
         self.rl_ajoint_var = tk.StringVar(value="")
         self.rl_bias_low_var = tk.StringVar(value="")
         self.rl_bias_high_var = tk.StringVar(value="")
+        self.rl_reward_average_seconds_var = tk.StringVar(value="")
+        self.rl_boundary_x_min_var = tk.StringVar(value="")
+        self.rl_boundary_x_max_var = tk.StringVar(value="")
+        self.rl_boundary_y_var = tk.StringVar(value="")
 
         self.gait_json_var = tk.StringVar()
         self.video_var = tk.StringVar()
         self.px_per_m_var = tk.StringVar(value=f"{DEFAULT_PX_PER_M:.6f}")
         self.preview_var = tk.BooleanVar(value=True)
         self.near_wall_note_var = tk.StringVar(value="Real MP4 near-wall plot currently uses the processed/cleaned tracked segment from the video tracker.")
+
+        for path in (ZIP_DIR, CSV_PNG_DIR, RL_GAIT_DIR):
+            path.mkdir(parents=True, exist_ok=True)
 
         self._build_layout()
         self.logger.write("Robot eel unified pipeline GUI ready.\n")
@@ -109,7 +131,7 @@ class EelPipelineGui:
 
         output_row = ttk.Frame(outer)
         output_row.pack(fill=tk.X, pady=(0, 8))
-        ttk.Label(output_row, text="Pipeline output root").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Label(output_row, text="Output root").pack(side=tk.LEFT, padx=(0, 8))
         ttk.Entry(output_row, textvariable=self.out_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(output_row, text="Browse", command=self.browse_output).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(output_row, text="Open", command=self.open_output_folder).pack(side=tk.LEFT, padx=(6, 0))
@@ -141,20 +163,36 @@ class EelPipelineGui:
         ttk.Entry(options, textvariable=self.rl_target_yaw_rate_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
         ttk.Label(options, text="Target radius m (blank = none)").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
         ttk.Entry(options, textvariable=self.rl_target_radius_var, width=10).grid(row=0, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Checkbutton(options, text="Reward yaw_rate", variable=self.rl_use_yaw_reward_var).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(options, text="yaw weight").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(options, textvariable=self.rl_yaw_reward_weight_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Checkbutton(options, text="Reward R", variable=self.rl_use_radius_reward_var).grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(options, textvariable=self.rl_radius_reward_weight_var, width=10).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
 
     def _build_export_options_frame(self, parent: ttk.Frame) -> None:
         export = ttk.LabelFrame(parent, text="Export options", padding=10)
         export.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(export, text="Output gait JSON").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(export, textvariable=self.rl_output_json_var).grid(row=0, column=1, columnspan=5, sticky=tk.EW, padx=4, pady=4)
-        ttk.Button(export, text="Browse", command=self.browse_rl_output).grid(row=0, column=6, sticky=tk.W, padx=4, pady=4)
-        ttk.Button(export, text="Auto name", command=self.auto_rl_output_name).grid(row=0, column=7, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Strategy").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Combobox(export, textvariable=self.rl_strategy_var, values=("best-step", "mean", "last"), state="readonly", width=10).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Samples").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(export, textvariable=self.rl_samples_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Max episodes").grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(export, textvariable=self.rl_max_episodes_var, width=10).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(export, text="Name").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(export, textvariable=self.rl_run_name_var, width=22).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(export, text="Runs").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(export, textvariable=self.rl_run_count_var, width=8).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(export, text="Strategy").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Combobox(
+            export,
+            textvariable=self.rl_strategy_var,
+            values=("policy-rerun-mean",),
+            state="readonly",
+            width=18,
+        ).grid(row=0, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Button(export, text="Auto name", command=self.auto_rl_output_name).grid(row=0, column=6, sticky=tk.W, padx=4, pady=4)
+
+        ttk.Label(export, text="Output gait JSON").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(export, textvariable=self.rl_output_json_var).grid(row=1, column=1, columnspan=5, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(export, text="Browse", command=self.browse_rl_output).grid(row=1, column=6, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(export, text="Fixed gait source").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(export, text="eval best policy rerun mean").grid(
+            row=2, column=1, columnspan=3, sticky=tk.W, padx=4, pady=4
+        )
         export.columnconfigure(5, weight=1)
 
     def _build_env_override_frame(self, parent: ttk.Frame) -> None:
@@ -170,6 +208,14 @@ class EelPipelineGui:
         ttk.Entry(advanced, textvariable=self.rl_bias_low_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
         ttk.Label(advanced, text="bias high").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
         ttk.Entry(advanced, textvariable=self.rl_bias_high_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="avg seconds").grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_reward_average_seconds_var, width=10).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="boundary x min").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_boundary_x_min_var, width=10).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="boundary x max").grid(row=2, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_boundary_x_max_var, width=10).grid(row=2, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="boundary y").grid(row=2, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_boundary_y_var, width=10).grid(row=2, column=5, sticky=tk.W, padx=4, pady=4)
 
     def _build_train_tab(self) -> None:
         tab = ttk.Frame(self.notebook, padding=10)
@@ -252,7 +298,7 @@ class EelPipelineGui:
 
         ttk.Label(
             tab,
-            text="Simulation plots stop at wall contact and save CSV / PNG / summary JSON under the pipeline output root.",
+            text="Simulation plots stop at wall contact and save generated files under mujoco_simulation/outputs.",
             foreground="#555555",
         ).pack(anchor=tk.W, pady=(8, 0))
 
@@ -294,11 +340,11 @@ class EelPipelineGui:
         ttk.Button(buttons, text="Open output root", command=self.open_output_folder).pack(side=tk.LEFT, padx=6)
 
         folders = (
-            f"Output folders:\n"
-            f"  {REAL_SUBDIR}/\n"
-            f"  {SIM_SUBDIR}/\n"
-            f"  {FIT_SUBDIR}/\n"
-            f"  outputs/rl_gaits/ for exported PPO gait JSONs"
+            "Output folders:\n"
+            "  outputs/csv_png/ for CSV/PNG and fitted-curve outputs\n"
+            "  outputs/zips/ for PPO .zip models\n"
+            "  outputs/json/rl_gaits/ for exported PPO gait JSONs\n"
+            f"  outputs/{REAL_SUBDIR}/ for real-video tracking"
         )
         ttk.Label(tab, text=folders).pack(anchor=tk.W, pady=(10, 0))
 
@@ -319,6 +365,27 @@ class EelPipelineGui:
         except ValueError as exc:
             raise ValueError(f"{label} must be a number or blank") from exc
 
+    def run_count(self) -> int:
+        try:
+            count = int(self.rl_run_count_var.get())
+        except ValueError as exc:
+            raise ValueError("Runs must be an integer") from exc
+        if count < 1:
+            raise ValueError("Runs must be at least 1")
+        return count
+
+    def run_base_name(self) -> str:
+        text = self.rl_run_name_var.get().strip()
+        if text:
+            return safe_name(Path(text).stem)
+        output_text = self.rl_output_json_var.get().strip()
+        if output_text:
+            return safe_name(Path(output_text).stem)
+        return "ppo_turning_policy"
+
+    def numbered_name(self, base_name: str, index: int, count: int) -> str:
+        return base_name if count == 1 else f"{base_name}_run{index:02d}"
+
     def browse_output(self) -> None:
         dirname = filedialog.askdirectory(title="Select pipeline output root")
         if dirname:
@@ -327,6 +394,7 @@ class EelPipelineGui:
     def browse_rl_model(self) -> None:
         filename = filedialog.askopenfilename(
             title="Select PPO model zip",
+            initialdir=str(ZIP_DIR),
             filetypes=(("PPO zip", "*.zip"), ("All files", "*.*")),
         )
         if filename:
@@ -343,11 +411,12 @@ class EelPipelineGui:
         )
         if filename:
             self.rl_output_json_var.set(filename)
+            self.rl_run_name_var.set(safe_name(Path(filename).stem))
 
     def browse_rl_train_output(self) -> None:
         filename = filedialog.asksaveasfilename(
             title="Select PPO training output base",
-            initialdir=str(SCRIPT_DIR / "outputs"),
+            initialdir=str(ZIP_DIR),
             filetypes=(("Stable-Baselines model base", "*"), ("Zip files", "*.zip"), ("All files", "*.*")),
         )
         if filename:
@@ -355,11 +424,12 @@ class EelPipelineGui:
             if filename.lower().endswith(".zip"):
                 filename = filename[:-4]
             self.rl_train_output_var.set(filename)
+            self.rl_run_name_var.set(safe_name(Path(filename).stem))
 
     def browse_rl_load_model(self) -> None:
         filename = filedialog.askopenfilename(
             title="Select PPO model zip to continue training",
-            initialdir=str(SCRIPT_DIR / "outputs"),
+            initialdir=str(ZIP_DIR),
             filetypes=(("PPO zip", "*.zip"), ("All files", "*.*")),
         )
         if filename:
@@ -388,10 +458,16 @@ class EelPipelineGui:
         return self.output_root() / REAL_SUBDIR
 
     def sim_out_dir(self) -> Path:
-        return self.output_root() / SIM_SUBDIR
+        return CSV_PNG_DIR / SIM_SUBDIR
 
     def fit_out_dir(self) -> Path:
-        return self.output_root() / FIT_SUBDIR
+        return CSV_PNG_DIR / FIT_SUBDIR
+
+    def policy_rollout_out_dir(self) -> Path:
+        return CSV_PNG_DIR / POLICY_ROLLOUT_SUBDIR
+
+    def eval_best_policy_out_dir(self) -> Path:
+        return CSV_PNG_DIR / "eval_best_policy_curves"
 
     def selected_videos(self) -> list[Path]:
         return [resolve_gui_path(path) for path in self._paths_from_var(self.video_var.get())]
@@ -419,17 +495,36 @@ class EelPipelineGui:
         yaw = safe_name(self.rl_target_yaw_rate_var.get().strip().replace(".", "p") or "yaw")
         radius = self.rl_target_radius_var.get().strip()
         radius_part = f"_r{safe_name(radius.replace('.', 'p'))}" if radius else ""
-        name = safe_name(f"{model_stem}_{direction}_yaw{yaw}{radius_part}_{self.rl_strategy_var.get()}")
+        reward_parts = []
+        if self.rl_use_yaw_reward_var.get():
+            reward_parts.append("yaw")
+        if self.rl_use_radius_reward_var.get():
+            reward_parts.append("r")
+        reward_part = "_reward_" + "_".join(reward_parts) if reward_parts else "_reward_none"
+        name = safe_name(f"{model_stem}_{direction}_yaw{yaw}{radius_part}{reward_part}_{self.rl_strategy_var.get()}")
+        self.rl_run_name_var.set(name)
+        self.rl_train_output_var.set(str(ZIP_DIR / name))
         self.rl_output_json_var.set(str(RL_GAIT_DIR / f"{name}.json"))
 
     def make_turning_config_from_gui(self) -> TurningConfig:
+        if not self.rl_use_yaw_reward_var.get() and not self.rl_use_radius_reward_var.get():
+            raise ValueError("Reward must use at least one of yaw_rate or R")
         cfg = TurningConfig()
         cfg.turn_direction = self.rl_turn_direction_var.get().strip()
         cfg.target_yaw_rate = abs(float(self.rl_target_yaw_rate_var.get()))
+        cfg.yaw_rate_weight = (
+            abs(float(self.rl_yaw_reward_weight_var.get())) if self.rl_use_yaw_reward_var.get() else 0.0
+        )
         radius = self._parse_optional_float(self.rl_target_radius_var.get(), "target radius")
         if radius is not None:
             cfg.target_radius = abs(radius)
-            cfg.radius_weight = 0.40
+            cfg.radius_weight = (
+                abs(float(self.rl_radius_reward_weight_var.get())) if self.rl_use_radius_reward_var.get() else 0.0
+            )
+        elif self.rl_use_radius_reward_var.get():
+            raise ValueError("Target radius is required when Reward R is enabled")
+        else:
+            cfg.radius_weight = 0.0
 
         freq = self._parse_optional_float(self.rl_freq_var.get(), "freq")
         if freq is not None:
@@ -448,6 +543,20 @@ class EelPipelineGui:
             cfg.joint_bias_high = high
         if cfg.joint_bias_low > cfg.joint_bias_high:
             raise ValueError("bias low cannot be greater than bias high")
+        avg_seconds = self._parse_optional_float(self.rl_reward_average_seconds_var.get(), "avg seconds")
+        if avg_seconds is not None:
+            cfg.reward_average_seconds = avg_seconds
+        boundary_x_min = self._parse_optional_float(self.rl_boundary_x_min_var.get(), "boundary x min")
+        if boundary_x_min is not None:
+            cfg.boundary_x_min = boundary_x_min
+        boundary_x_max = self._parse_optional_float(self.rl_boundary_x_max_var.get(), "boundary x max")
+        if boundary_x_max is not None:
+            cfg.boundary_x_max = boundary_x_max
+        boundary_y = self._parse_optional_float(self.rl_boundary_y_var.get(), "boundary y")
+        if boundary_y is not None:
+            cfg.boundary_y = abs(boundary_y)
+        if cfg.boundary_x_min >= cfg.boundary_x_max:
+            raise ValueError("boundary x min must be less than boundary x max")
         return cfg
 
     def set_busy(self, busy: bool) -> None:
@@ -475,10 +584,28 @@ class EelPipelineGui:
         output_base = resolve_gui_path(Path(self.rl_train_output_var.get()))
         return output_base if output_base.suffix.lower() == ".zip" else output_base.with_suffix(".zip")
 
-    def _build_train_command(self) -> list[str]:
-        output_base = resolve_gui_path(Path(self.rl_train_output_var.get()))
+    def _training_output_zip_for_base(self, output_base: Path) -> Path:
+        return output_base if output_base.suffix.lower() == ".zip" else output_base.with_suffix(".zip")
+
+    def _best_model_zip_for_model(self, model_path: Path) -> Path | None:
+        model_path = Path(model_path).expanduser().resolve()
+        stem = model_path.stem if model_path.suffix.lower() == ".zip" else model_path.name
+        best_zip = CSV_PNG_DIR / f"{stem}_eval" / "best_model" / "best_model.zip"
+        return best_zip if best_zip.exists() else None
+
+    def _eval_best_policy_summary_for_model(self, model_path: Path) -> Path | None:
+        model_path = Path(model_path).expanduser().resolve()
+        stem = model_path.stem if model_path.suffix.lower() == ".zip" else model_path.name
+        summary_path = self.eval_best_policy_out_dir() / f"{stem}_eval_best_policy_summary.json"
+        return summary_path if summary_path.exists() else None
+
+    def _build_train_command(self, output_base: Path | None = None) -> list[str]:
+        if not self.rl_use_yaw_reward_var.get() and not self.rl_use_radius_reward_var.get():
+            raise ValueError("Reward must use at least one of yaw_rate or R")
+        output_base = resolve_gui_path(Path(output_base if output_base is not None else self.rl_train_output_var.get()))
         if output_base.suffix.lower() == ".zip":
             output_base = output_base.with_suffix("")
+        eval_base = CSV_PNG_DIR / output_base.name
 
         cmd = [
             sys.executable,
@@ -493,11 +620,24 @@ class EelPipelineGui:
             str(abs(float(self.rl_target_yaw_rate_var.get()))),
             "--eval-freq",
             str(int(self.rl_eval_freq_var.get())),
+            "--eval-log-dir",
+            str(eval_base.with_name(f"{eval_base.name}_eval")),
+            "--plot-output",
+            str(eval_base.with_name(f"{eval_base.name}_eval_reward.png")),
         ]
 
         radius = self._parse_optional_float(self.rl_target_radius_var.get(), "target radius")
         if radius is not None:
             cmd += ["--target-radius", str(abs(radius))]
+        elif self.rl_use_radius_reward_var.get():
+            raise ValueError("Target radius is required when Reward R is enabled")
+
+        cmd += [
+            "--yaw-rate-weight",
+            str(abs(float(self.rl_yaw_reward_weight_var.get())) if self.rl_use_yaw_reward_var.get() else 0.0),
+            "--radius-weight",
+            str(abs(float(self.rl_radius_reward_weight_var.get())) if self.rl_use_radius_reward_var.get() else 0.0),
+        ]
 
         load_model = self.rl_load_model_var.get().strip()
         if load_model:
@@ -509,6 +649,10 @@ class EelPipelineGui:
             ("--ajoint", self.rl_ajoint_var.get(), "ajoint"),
             ("--joint-bias-low", self.rl_bias_low_var.get(), "bias low"),
             ("--joint-bias-high", self.rl_bias_high_var.get(), "bias high"),
+            ("--reward-average-seconds", self.rl_reward_average_seconds_var.get(), "avg seconds"),
+            ("--boundary-x-min", self.rl_boundary_x_min_var.get(), "boundary x min"),
+            ("--boundary-x-max", self.rl_boundary_x_max_var.get(), "boundary x max"),
+            ("--boundary-y", self.rl_boundary_y_var.get(), "boundary y"),
         ]
         for flag, text, label in optional_args:
             value = self._parse_optional_float(text, label)
@@ -520,19 +664,33 @@ class EelPipelineGui:
         self._start_thread(self._run_rl_train, export, view, plot)
 
     def _run_rl_train(self, export: bool, view: bool, plot: bool) -> None:
-        cmd = self._build_train_command()
-        self.logger.write("\n=== RL PPO training ===\n")
-        self.logger.write("CMD: " + " ".join(cmd) + "\n")
-        self._run_command_stream(cmd)
+        count = self.run_count()
+        base_name = self.run_base_name()
+        last_model_zip: Path | None = None
+        last_output_json: Path | None = None
+        for index in range(1, count + 1):
+            run_name = self.numbered_name(base_name, index, count)
+            output_base = ZIP_DIR / run_name
+            output_json = RL_GAIT_DIR / f"{run_name}.json"
+            cmd = self._build_train_command(output_base)
+            self.logger.write(f"\n=== RL PPO training {index}/{count}: {run_name} ===\n")
+            self.logger.write("CMD: " + " ".join(cmd) + "\n")
+            self._run_command_stream(cmd)
 
-        model_zip = self._training_output_zip_path()
-        self.logger.write(f"training output model: {model_zip}\n")
-        if not model_zip.exists():
-            raise FileNotFoundError(f"Training finished but model zip was not found: {model_zip}")
+            model_zip = self._training_output_zip_for_base(output_base)
+            self.logger.write(f"training output model: {model_zip}\n")
+            if not model_zip.exists():
+                raise FileNotFoundError(f"Training finished but model zip was not found: {model_zip}")
 
-        self.root.after(0, lambda: self.rl_model_var.set(str(model_zip)))
-        if export:
-            self._run_rl_export_with_model(model_zip, view=view, plot=plot)
+            last_model_zip = model_zip
+            last_output_json = output_json
+            if export:
+                self._run_rl_export_with_model(model_zip, view=view and index == count, plot=plot, output_path=output_json)
+
+        if last_model_zip is not None:
+            self.root.after(0, lambda path=last_model_zip: self.rl_model_var.set(str(path)))
+        if last_output_json is not None:
+            self.root.after(0, lambda path=last_output_json: self.rl_output_json_var.set(str(path)))
 
     def _run_command_stream(self, cmd: list[str]) -> None:
         proc = subprocess.Popen(
@@ -555,38 +713,60 @@ class EelPipelineGui:
 
     def _run_rl_export(self, view: bool, plot: bool) -> None:
         model_path = resolve_gui_path(Path(self.rl_model_var.get()))
-        self._run_rl_export_with_model(model_path, view=view, plot=plot)
+        count = self.run_count()
+        base_name = self.run_base_name()
+        if count == 1:
+            output_json = RL_GAIT_DIR / f"{base_name}.json"
+            self._run_rl_export_with_model(model_path, view=view, plot=plot, output_path=output_json)
+            self.root.after(0, lambda path=output_json: self.rl_output_json_var.set(str(path)))
+            return
+        last_output_json: Path | None = None
+        for index in range(1, count + 1):
+            run_name = self.numbered_name(base_name, index, count)
+            output_json = RL_GAIT_DIR / f"{run_name}.json"
+            self._run_rl_export_with_model(model_path, view=view and index == count, plot=plot, output_path=output_json)
+            last_output_json = output_json
+        if last_output_json is not None:
+            self.root.after(0, lambda path=last_output_json: self.rl_output_json_var.set(str(path)))
 
-    def _run_rl_export_with_model(self, model_path: Path, *, view: bool, plot: bool) -> None:
+    def _run_rl_export_with_model(self, model_path: Path, *, view: bool, plot: bool, output_path: Path | None = None) -> None:
         model_path = Path(model_path).expanduser().resolve()
         if model_path.is_dir():
             raise IsADirectoryError(f"PPO model must be a .zip file, not a folder: {model_path}")
         if not model_path.exists():
             raise FileNotFoundError(f"PPO model zip not found: {model_path}")
-        output_path = resolve_gui_path(Path(self.rl_output_json_var.get()))
+        output_path = resolve_gui_path(Path(output_path if output_path is not None else self.rl_output_json_var.get()))
         cfg = self.make_turning_config_from_gui()
-        samples = int(self.rl_samples_var.get())
-        max_episodes = int(self.rl_max_episodes_var.get())
-        strategy = self.rl_strategy_var.get()
+        best_model = self._best_model_zip_for_model(model_path)
+        export_model = best_model or model_path
+        model_source = "eval_best_model" if best_model is not None else "selected_model"
 
         self.logger.write("\n=== RL turning policy export ===\n")
-        self.logger.write(f"model={model_path}\n")
+        self.logger.write(f"selected_model={model_path}\n")
+        self.logger.write(f"fixed_gait_model={export_model}\n")
+        self.logger.write(f"model_source={model_source}\n")
         self.logger.write(f"turn_direction={cfg.turn_direction}, target_yaw_rate={cfg.target_yaw_rate}\n")
         self.logger.write(f"target_radius={cfg.target_radius}\n")
-        self.logger.write(f"strategy={strategy}, samples={samples}, max_episodes={max_episodes}\n")
+        self.logger.write(f"train_boundary=({cfg.boundary_x_min}, {cfg.boundary_x_max}, +/-{cfg.boundary_y})\n")
+        self.logger.write("strategy=policy-rerun-mean\n")
 
         gait_name = output_path.stem
-        gait, diag = export_turning_policy_to_gait(
-            model_path,
-            cfg,
-            samples=samples,
-            max_episodes=max_episodes,
-            strategy=strategy,
-            stochastic=False,
+        outputs, diag = write_mean_fixed_gait_from_best_policy(
             name=gait_name,
+            cfg=cfg,
+            model_zip=export_model,
+            gait_path=output_path,
+            policy_out_dir=self.policy_rollout_out_dir(),
+            source_extra={
+                "gui": {
+                    "selected_model": str(model_path),
+                    "model_source": model_source,
+                }
+            },
         )
-        write_gait_json(output_path, gait)
         self.logger.write(f"saved gait JSON: {output_path}\n")
+        self.logger.write(f"policy rerun CSV: {outputs.get('policy_rerun_csv')}\n")
+        self.logger.write(f"policy rerun plot: {outputs.get('policy_rerun_png')}\n")
         self.logger.write("diagnostics: " + json.dumps(diag, indent=2) + "\n")
         self.root.after(0, lambda: self._append_gait_path_to_selection(output_path))
 
@@ -595,9 +775,52 @@ class EelPipelineGui:
             fit_out = self.fit_out_dir()
             sim_out.mkdir(parents=True, exist_ok=True)
             fit_out.mkdir(parents=True, exist_ok=True)
+            self.logger.write("\n=== Fixed gait curve from exported JSON ===\n")
             self._run_one_json_gait(output_path, set(), sim_out, fit_out)
         if view:
             self.root.after(0, lambda: self._launch_viewer(output_path))
+
+    def _run_policy_rollout_plot(self, model_path: Path, cfg: TurningConfig, name: str) -> dict:
+        eval_best_summary = self._eval_best_policy_summary_for_model(model_path)
+        if eval_best_summary is not None:
+            summary = json.loads(eval_best_summary.read_text(encoding="utf-8"))
+            self.logger.write("\n=== Eval best policy curve ===\n")
+            self.logger.write("model_source=eval_best_episode\n")
+            self.logger.write(f"summary={eval_best_summary}\n")
+            self.logger.write(f"trajectory CSV: {summary.get('trajectory_csv')}\n")
+            self.logger.write(f"fitted plot: {summary.get('eval_best_policy_png')}\n")
+            fitted_yaw = summary.get("fitted_yaw_rate_rad_s")
+            yaw_err = summary.get("fitted_yaw_rate_error_rad_s")
+            fitted_yaw_text = "nan" if fitted_yaw is None else f"{float(fitted_yaw):.3f}rad/s"
+            yaw_err_text = "nan" if yaw_err is None else f"{float(yaw_err):.3f}rad/s"
+            self.logger.write(f"  fitted_yaw_rate={fitted_yaw_text}, yaw_err={yaw_err_text}\n")
+            return summary
+
+        best_model = self._best_model_zip_for_model(model_path)
+        plot_model = best_model or model_path
+        model_source = "best_eval" if best_model is not None else "selected_model"
+        out_dir = self.policy_rollout_out_dir()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        self.logger.write("\n=== PPO policy rollout curve ===\n")
+        self.logger.write(f"model_source={model_source}\n")
+        self.logger.write(f"policy_model={plot_model}\n")
+        self.logger.write(f"out_dir={out_dir}\n")
+        summary = write_rollout_outputs(
+            name=name,
+            model_zip=plot_model,
+            cfg=cfg,
+            out_dir=out_dir,
+            deterministic=True,
+        )
+        summary["model_source"] = model_source
+        fitted_yaw = summary.get("fitted_yaw_rate_rad_s")
+        yaw_err = summary.get("fitted_yaw_rate_error_rad_s")
+        fitted_yaw_text = "nan" if fitted_yaw is None else f"{float(fitted_yaw):.3f}rad/s"
+        yaw_err_text = "nan" if yaw_err is None else f"{float(yaw_err):.3f}rad/s"
+        self.logger.write(f"  policy rollout CSV: {summary.get('trajectory_csv')}\n")
+        self.logger.write(f"  policy rollout plot: {summary.get('policy_rollout_png')}\n")
+        self.logger.write(f"  fitted_yaw_rate={fitted_yaw_text}, yaw_err={yaw_err_text}\n")
+        return summary
 
     def _append_gait_path_to_selection(self, path: Path) -> None:
         paths = self.selected_gait_jsons()
@@ -724,10 +947,20 @@ class EelPipelineGui:
         fig.savefig(png_path)
         plt.close(fig)
 
-    def _write_json_gait_fitted_plot(self, png_path: Path, name: str, arr: np.ndarray) -> dict:
+    def _write_json_gait_fitted_plot(
+        self,
+        png_path: Path,
+        name: str,
+        arr: np.ndarray,
+        target_yaw_rate: float | None = None,
+        turn_direction: str | None = None,
+        target_radius_m: float | None = None,
+    ) -> dict:
         xy = rotate_sim_xy(arr[:, 1:3])
         curve, fit = fitted_curve(xy)
         metrics = trajectory_metrics(arr, xy)
+        metrics.update(add_fitted_yaw_rate_metrics(fit, metrics, target_yaw_rate, turn_direction))
+        metrics.update(add_fitted_radius_metrics(fit, target_radius_m))
 
         colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
         color = colors[0] if colors else None
@@ -777,21 +1010,37 @@ class EelPipelineGui:
         trajectory_png = sim_out / f"{name}_trajectory.png"
         self._write_json_gait_trajectory_plot(trajectory_png, name, arr, summary)
 
+        target_info = extract_gait_target_info(gait)
         fixed_summary = {
             "name": name,
             "gait_name_in_json": gait.get("name"),
             "source_gait_json": str(gait_path),
             "trajectory_csv": str(csv_path),
             "trajectory_png": str(trajectory_png),
-            "duration_s": float(arr[-1, 0]),
+            "duration_s": float(arr[-1, 0] - arr[0, 0]) if arr.shape[0] >= 2 else 0.0,
             "hit_wall": bool(hit_wall),
+            **target_info,
             **{key: self._json_ready(value) for key, value in summary.items() if key != "warmup_index"},
         }
         fixed_summary_path = sim_out / f"{name}_summary.json"
         fixed_summary_path.write_text(json.dumps(fixed_summary, indent=2), encoding="utf-8")
 
         fitted_png = fit_out / f"sim_{name}_fitted_rotated.png"
-        fitted_summary = self._write_json_gait_fitted_plot(fitted_png, name, arr)
+        yaw_reward_weight = target_info.get("yaw_rate_reward_weight")
+        target_yaw_for_plot = None if yaw_reward_weight == 0.0 else target_info.get("target_yaw_rate_rad_s")
+        radius_reward_weight = target_info.get("radius_reward_weight")
+        target_radius_for_plot = None if radius_reward_weight == 0.0 else target_info.get("target_radius_m")
+        fitted_summary = self._write_json_gait_fitted_plot(
+            fitted_png,
+            name,
+            arr,
+            target_yaw_rate=target_yaw_for_plot,
+            turn_direction=target_info.get("turn_direction"),
+            target_radius_m=target_radius_for_plot,
+        )
+        CSV_PNG_DIR.mkdir(parents=True, exist_ok=True)
+        curve_output_png = CSV_PNG_DIR / fitted_png.name
+        shutil.copy2(fitted_png, curve_output_png)
         fitted_summary.update(
             {
                 "gait_name_in_json": gait.get("name"),
@@ -800,7 +1049,9 @@ class EelPipelineGui:
                 "trajectory_png": str(trajectory_png),
                 "trajectory_summary_json": str(fixed_summary_path),
                 "fit_png": str(fitted_png),
+                "fit_output_png": str(curve_output_png),
                 "hit_wall": bool(hit_wall),
+                **target_info,
             }
         )
         fitted_summary = {key: self._json_ready(value) for key, value in fitted_summary.items()}
@@ -809,13 +1060,27 @@ class EelPipelineGui:
 
         radius = fitted_summary.get("radius")
         radius_text = "line/inf" if radius is None else f"{float(radius):.4f}m"
+        target_yaw = fitted_summary.get("target_yaw_rate_rad_s")
+        fitted_yaw = fitted_summary.get("fitted_yaw_rate_rad_s")
+        yaw_err = fitted_summary.get("fitted_yaw_rate_error_rad_s")
+        target_radius = fitted_summary.get("target_radius_m")
+        radius_err = fitted_summary.get("fitted_radius_error_m")
+        target_text = "none" if target_yaw is None else f"{float(target_yaw):.3f}rad/s"
+        fitted_text = "nan" if fitted_yaw is None else f"{float(fitted_yaw):.3f}rad/s"
+        err_text = "nan" if yaw_err is None else f"{float(yaw_err):.3f}rad/s"
+        radius_target_text = "none" if target_radius is None else f"{float(target_radius):.3f}m"
+        radius_err_text = "nan" if radius_err is None else f"{float(radius_err):.3f}m"
         self.logger.write(f"  output base name: {name}\n")
         self.logger.write(f"  trajectory CSV: {csv_path}\n")
         self.logger.write(f"  trajectory plot: {trajectory_png}\n")
         self.logger.write(f"  fitted plot: {fitted_png}\n")
+        self.logger.write(f"  fitted output plot: {curve_output_png}\n")
         self.logger.write(f"  fitted summary: {fitted_summary_path}\n")
         self.logger.write(
-            f"  hit_wall={hit_wall}, R={radius_text}, arc={float(fitted_summary.get('arc_deg') or 0.0):.3f}deg, "
+            f"  hit_wall={hit_wall}, R={radius_text}, fitted_yaw_rate={fitted_text}, "
+            f"target={target_text}, err={err_text}, "
+            f"R_target={radius_target_text}, R_err={radius_err_text}, "
+            f"arc={float(fitted_summary.get('arc_deg') or 0.0):.3f}deg, "
             f"rmse={float(fitted_summary.get('rmse') or 0.0):.4f}m\n"
         )
         return fitted_summary

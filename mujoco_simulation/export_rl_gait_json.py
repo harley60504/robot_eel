@@ -21,13 +21,13 @@ def parse_args():
     parser.add_argument(
         "--model",
         type=Path,
-        default=Path("outputs/ppo_free_swim_shape.zip"),
+        default=Path("outputs/zips/ppo_free_swim_shape.zip"),
         help="Path to the trained PPO .zip model.",
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("gaits/rl_straight.json"),
+        default=Path("outputs/json/rl_gaits/rl_straight.json"),
         help="Output gait JSON path.",
     )
     parser.add_argument("--name", default="rl_straight", help="Name stored in the gait JSON.")

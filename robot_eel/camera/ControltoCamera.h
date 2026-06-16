@@ -23,8 +23,6 @@ typedef struct {
   float    jointBiasDeg[bodyNum];
   bool     isPaused;
   uint8_t  controlMode;
-  bool     useFeedback;
-  float    feedbackGain;
   uint8_t  checksum;      // XOR checksum
 } ControlPacket;
 #pragma pack(pop)
@@ -51,9 +49,7 @@ static inline void sendControlParamsUART(
   const float* phaseLags,
   const float* jointBiasDeg,
   bool   isPaused,
-  uint8_t controlMode,
-  bool   useFeedback,
-  float  feedbackGain
+  uint8_t controlMode
 ) {
   ControlPacket pkt;
 
@@ -71,8 +67,6 @@ static inline void sendControlParamsUART(
   }
   pkt.isPaused      = isPaused;
   pkt.controlMode   = controlMode;
-  pkt.useFeedback   = useFeedback;
-  pkt.feedbackGain  = feedbackGain;
 
   pkt.checksum = calcPacketChecksum(
     reinterpret_cast<const uint8_t*>(&pkt),

@@ -31,9 +31,7 @@ void servoTask(void *pv)
       // getCPGOutput(j) for each joint.
       if (controlMode == MODE_CPG)
       {
-        float fb_phase = 0.0f;
-        float fb_amp   = 0.0f;
-        updateCPGAll(t, dt, fb_phase, fb_amp);
+        updateCPGAll(dt);
       }
 
       /* ========= 1. 計算 target 並輸出 MOVE ========= */

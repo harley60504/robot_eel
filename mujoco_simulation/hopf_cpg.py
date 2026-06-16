@@ -25,18 +25,13 @@ def amp_scales_to_mu_scales(amp_scales: tuple[float, ...] | np.ndarray | None) -
 @dataclass
 class HopfCPGParams:
     frequency: float = 1.0
-    wavelength: float = 1.5
+    wavelength: float = 1.6275
     body_length: float = 1.0
     ajoint: float = degrees_to_radians(DEFAULT_AJOINT_DEG)
     alpha: float = 4.0
     mu: float = 1.0
     mu_scales: tuple[float, ...] | None = None
     k_couple: float = 0.35
-    k_anchor: float = 0.0
-    k_fb_phase: float = 0.8
-    k_fb_amp: float = 0.25
-    fb_phase: float = 0.0
-    fb_amp: float = 0.0
     amp_scales: tuple[float, ...] | None = None
     phase_lags: tuple[float, ...] | None = None
     joint_bias: tuple[float, ...] | None = None
@@ -78,12 +73,7 @@ class HopfCPG:
                 err_r = wrap_pi((old_theta[j + 1] - old_theta[j]) - desired_r)
                 dtheta[j] += p.k_couple * np.sin(err_r)
 
-            th_ref = omega * t + phase_offsets[j]
-            e_ref = wrap_pi(th_ref - old_theta[j])
-            dtheta[j] += p.k_anchor * np.sin(e_ref)
 
-        dtheta += p.k_fb_phase * p.fb_phase
-        dr += p.k_fb_amp * p.fb_amp
 
         self.r = np.maximum(0.0, old_r + dr * dt)
         self.theta = wrap_pi(old_theta + dtheta * dt)

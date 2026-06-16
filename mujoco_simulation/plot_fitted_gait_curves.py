@@ -1,14 +1,18 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
+from typing import Any
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+CSV_PNG_DIR = SCRIPT_DIR / "outputs" / "csv_png"
 GAITS = ("straight", "turn_left", "turn_right", "spin_left", "spin_right")
 
 REAL_VIDEO_CONFIGS = (
@@ -27,10 +31,10 @@ PX_PER_M = 875.0 / 1.5
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Plot fitted sim curves and import selected real videos.")
-    parser.add_argument("--sim-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_3x1_5"))
+    parser.add_argument("--sim-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_mean"))
     parser.add_argument("--video-analysis-dir", type=Path, default=Path("outputs/video_analysis"))
     parser.add_argument("--recordings-dir", type=Path, default=Path("../Release/python_backend/recordings"))
-    parser.add_argument("--out-dir", type=Path, default=Path("outputs/fitted_curve_comparison"))
+    parser.add_argument("--out-dir", type=Path, default=Path("outputs/fitted_curve_comparison_mean"))
     parser.add_argument("--sim-only", action="store_true", help="Only plot MuJoCo sim fitted curves. Skip real videos.")
     return parser.parse_args()
 
@@ -39,6 +43,23 @@ def resolve_from_cwd(path: Path) -> Path:
     if path.is_absolute():
         return path
     return (Path.cwd() / path).resolve()
+
+
+def safe_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def safe_read_summary(summary_path: Path) -> dict:
+    try:
+        return json.loads(summary_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 def rotate_sim_xy(xy: np.ndarray) -> np.ndarray:
@@ -102,6 +123,10 @@ def trajectory_metrics(arr: np.ndarray, xy_view: np.ndarray) -> dict:
     straight_distance = float(np.linalg.norm(xy_view[-1] - xy_view[0]))
     forward_displacement = float(xy_view[-1, 1] - xy_view[0, 1])
     lateral_drift = float(xy_view[-1, 0] - xy_view[0, 0])
+    actual_yaw_rate = None
+    if arr.shape[1] >= 4 and duration > 0.0:
+        yaw = np.unwrap(arr[:, 3].astype(np.float64))
+        actual_yaw_rate = float((yaw[-1] - yaw[0]) / duration)
     return {
         "duration_s": duration,
         "path_distance_m": path_distance,
@@ -110,6 +135,94 @@ def trajectory_metrics(arr: np.ndarray, xy_view: np.ndarray) -> dict:
         "forward_displacement_m": forward_displacement,
         "mean_forward_speed_m_s": forward_displacement / duration,
         "lateral_drift_m": lateral_drift,
+        "actual_yaw_rate_rad_s": actual_yaw_rate,
+    }
+
+
+def target_yaw_rate_from_summary(data: dict) -> float | None:
+    yaw_weight = safe_float(data.get("yaw_rate_reward_weight"))
+    if yaw_weight == 0.0:
+        return None
+    direct = safe_float(data.get("target_yaw_rate_rad_s"))
+    if direct is not None:
+        return direct
+    source = data.get("source")
+    if isinstance(source, dict):
+        env_config = source.get("env_config")
+        if isinstance(env_config, dict) and safe_float(env_config.get("yaw_rate_weight")) == 0.0:
+            return None
+        return safe_float(source.get("target_yaw_rate"))
+    return None
+
+
+def target_radius_from_summary(data: dict) -> float | None:
+    radius_weight = safe_float(data.get("radius_reward_weight"))
+    if radius_weight == 0.0:
+        return None
+    direct = safe_float(data.get("target_radius_m"))
+    if direct is not None:
+        return direct
+    source = data.get("source")
+    if isinstance(source, dict):
+        env_config = source.get("env_config")
+        if isinstance(env_config, dict) and safe_float(env_config.get("radius_weight")) == 0.0:
+            return None
+        return safe_float(source.get("target_radius"))
+    return None
+
+
+def read_sim_sidecar_summary(csv_path: Path) -> dict:
+    sidecar = csv_path.with_name(csv_path.name.removesuffix("_trajectory.csv") + "_summary.json")
+    return safe_read_summary(sidecar) if sidecar.exists() else {}
+
+
+def add_fitted_yaw_rate_metrics(
+    fit: dict,
+    metrics: dict,
+    target_yaw_rate: float | None = None,
+    turn_direction: str | None = None,
+) -> dict:
+    """Calculate effective yaw rate from fitted arc / trajectory duration.
+
+    This is a fitted trajectory metric, not the raw MuJoCo qvel[2].  If target
+    yaw rate is available, its sign defines left/right direction.
+    """
+    duration_s = max(float(metrics.get("duration_s") or 0.0), 1e-9)
+    arc_rad = math.radians(abs(float(fit.get("arc_deg") or 0.0)))
+    target = safe_float(target_yaw_rate)
+    sign_source = target
+    if sign_source is None:
+        direction = (turn_direction or "").lower().strip()
+        if direction in {"right", "cw", "-", "negative"}:
+            sign_source = -1.0
+        elif direction in {"left", "ccw", "+", "positive"}:
+            sign_source = 1.0
+    if sign_source is None:
+        actual_yaw_rate = safe_float(metrics.get("actual_yaw_rate_rad_s"))
+        sign_source = actual_yaw_rate if actual_yaw_rate not in (None, 0.0) else 1.0
+    signed_arc_rad = math.copysign(arc_rad, sign_source)
+    fitted = signed_arc_rad / duration_s
+    err = None if target is None else abs(fitted - target)
+    radius = safe_float(fit.get("radius"))
+    fitted_arc_length = None if radius is None else abs(radius * arc_rad)
+    fitted_speed = None if fitted_arc_length is None else fitted_arc_length / duration_s
+    return {
+        "target_yaw_rate_rad_s": target,
+        "fitted_yaw_rate_rad_s": fitted,
+        "fitted_yaw_rate_error_rad_s": err,
+        "fitted_arc_rad": signed_arc_rad,
+        "fitted_arc_length_m": fitted_arc_length,
+        "fitted_speed_m_s": fitted_speed,
+    }
+
+
+def add_fitted_radius_metrics(fit: dict, target_radius_m: float | None = None) -> dict:
+    target = safe_float(target_radius_m)
+    fitted = safe_float(fit.get("radius"))
+    err = None if target is None or fitted is None else abs(fitted - target)
+    return {
+        "target_radius_m": target,
+        "fitted_radius_error_m": err,
     }
 
 
@@ -133,31 +246,64 @@ def draw_rotated_tank(ax):
     ax.set_ylabel("forward (m)")
 
 
+def _yaw_text(metrics: dict) -> str:
+    yaw_weight = safe_float(metrics.get("yaw_rate_reward_weight"))
+    target = safe_float(metrics.get("target_yaw_rate_rad_s"))
+    fitted = safe_float(metrics.get("fitted_yaw_rate_rad_s"))
+    err = safe_float(metrics.get("fitted_yaw_rate_error_rad_s"))
+    if fitted is None:
+        return ""
+    if target is None or yaw_weight == 0.0:
+        return f"\nyaw_fit = {fitted:.3f} rad/s"
+    return f"\nyaw_target = {target:.3f} rad/s\nyaw_fit = {fitted:.3f} rad/s\nyaw_err = {err:.3f} rad/s"
+
+
+def _radius_text(metrics: dict) -> str:
+    radius_weight = safe_float(metrics.get("radius_reward_weight"))
+    if radius_weight == 0.0:
+        return ""
+    target = safe_float(metrics.get("target_radius_m"))
+    err = safe_float(metrics.get("fitted_radius_error_m"))
+    if target is None:
+        return ""
+    if err is None:
+        return f"\nR target = {target:.3f} m\nR err = nan m"
+    return f"\nR target = {target:.3f} m\nR err = {err:.3f} m"
+
+
 def sim_metric_text(name: str, fit: dict, metrics: dict) -> str:
+    yaw_text = _yaw_text(metrics)
+    radius_text = _radius_text(metrics)
     if fit["radius"] is None or name == "straight":
         return (
-            "R = ∞ m\n"
+            "R = ??m\n"
             f"d_forward = {metrics['forward_displacement_m']:.3f} m\n"
             f"v_forward = {metrics['mean_forward_speed_m_s']:.3f} m/s\n"
             f"lateral drift = {metrics['lateral_drift_m']:.3f} m"
+            f"{radius_text}"
+            f"{yaw_text}"
         )
+    fitted_speed = safe_float(metrics.get("fitted_speed_m_s"))
+    speed_text = "nan" if fitted_speed is None else f"{fitted_speed:.3f}"
     return (
         f"R = {fit['radius']:.3f} m\n"
-        f"v = {metrics['mean_speed_m_s']:.3f} m/s\n"
+        f"v_fit = {speed_text} m/s\n"
         f"arc = {fit['arc_deg']:.1f} deg\n"
         f"RMSE = {fit['rmse']:.3f}"
+        f"{radius_text}"
+        f"{yaw_text}"
     )
 
 
 def add_sim_metric_box(ax, text: str) -> None:
     ax.text(
-        0.28,
+        0.34,
         0.97,
         text,
         transform=ax.transAxes,
         va="top",
         ha="right",
-        fontsize=9,
+        fontsize=8,
         bbox=dict(boxstyle="round,pad=0.35", facecolor="white", alpha=0.88, edgecolor="#cccccc"),
     )
 
@@ -166,6 +312,30 @@ def sim_trajectory_files(sim_dir: Path) -> list[Path]:
     files = sorted(sim_dir.glob("*_trajectory.csv"))
     fixed_order = {name: idx for idx, name in enumerate(GAITS)}
     return sorted(files, key=lambda p: fixed_order.get(p.name.removesuffix("_trajectory.csv"), 9999))
+
+
+def load_trajectory(csv_path: Path) -> np.ndarray:
+    arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    return arr
+
+
+def fit_sim_trajectory(csv_path: Path):
+    name = csv_path.name.removesuffix("_trajectory.csv")
+    arr = load_trajectory(csv_path)
+    xy = rotate_sim_xy(arr[:, 1:3])
+    curve, fit = fitted_curve(xy)
+    metrics = trajectory_metrics(arr, xy)
+    sidecar = read_sim_sidecar_summary(csv_path)
+    target_yaw_rate = target_yaw_rate_from_summary(sidecar)
+    target_radius_m = target_radius_from_summary(sidecar)
+    metrics.update(add_fitted_yaw_rate_metrics(fit, metrics, target_yaw_rate, sidecar.get("turn_direction")))
+    metrics.update(add_fitted_radius_metrics(fit, target_radius_m))
+    for key in ("turn_direction", "target_radius_m", "source_gait_json", "yaw_rate_reward_weight", "radius_reward_weight"):
+        if sidecar.get(key) is not None:
+            metrics[key] = sidecar.get(key)
+    return name, arr, xy, curve, fit, metrics
 
 
 def plot_sim_curves(sim_dir: Path, out_dir: Path):
@@ -178,21 +348,17 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
 
     fig, ax = plt.subplots(figsize=(5.2, 8.2), dpi=170)
     draw_rotated_tank(ax)
+    fitted_items = []
     for idx, csv_path in enumerate(files):
-        name = csv_path.name.removesuffix("_trajectory.csv")
-        arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
-        if arr.ndim == 1:
-            arr = arr.reshape(1, -1)
+        name, arr, xy, curve, fit, metrics = fit_sim_trajectory(csv_path)
         if arr.shape[0] < 2:
             continue
-        xy = rotate_sim_xy(arr[:, 1:3])
-        curve, fit = fitted_curve(xy)
-        metrics = trajectory_metrics(arr, xy)
         color = colors[idx % len(colors)]
         ax.plot(curve[:, 0], curve[:, 1], color=color, linewidth=2.6, label=name)
         ax.scatter([xy[0, 0]], [xy[0, 1]], s=26, color=color, edgecolor="black", zorder=4)
         ax.scatter([xy[-1, 0]], [xy[-1, 1]], s=44, marker="x", color=color, linewidth=2.0, zorder=4)
         rows.append({"name": name, **fit, **metrics})
+        fitted_items.append((idx, name, arr, xy, curve, fit, metrics))
 
     if not rows:
         print(f"skip sim curves: trajectory files in {sim_dir} had too few points")
@@ -202,19 +368,13 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
     ax.set_title("MuJoCo fitted curves, rotated to camera view")
     ax.legend(loc="upper left", fontsize=8)
     fig.tight_layout()
-    fig.savefig(out_dir / "sim_fitted_curves_rotated.png")
+    combined_png = out_dir / "sim_fitted_curves_rotated.png"
+    fig.savefig(combined_png)
+    CSV_PNG_DIR.mkdir(parents=True, exist_ok=True)
+    fig.savefig(CSV_PNG_DIR / combined_png.name)
     plt.close(fig)
 
-    for idx, csv_path in enumerate(files):
-        name = csv_path.name.removesuffix("_trajectory.csv")
-        arr = np.loadtxt(csv_path, delimiter=",", skiprows=1)
-        if arr.ndim == 1:
-            arr = arr.reshape(1, -1)
-        if arr.shape[0] < 2:
-            continue
-        xy = rotate_sim_xy(arr[:, 1:3])
-        curve, fit = fitted_curve(xy)
-        metrics = trajectory_metrics(arr, xy)
+    for idx, name, arr, xy, curve, fit, metrics in fitted_items:
         fig, ax = plt.subplots(figsize=(4.8, 8.0), dpi=170)
         draw_rotated_tank(ax)
         color = colors[idx % len(colors)]
@@ -224,8 +384,18 @@ def plot_sim_curves(sim_dir: Path, out_dir: Path):
         ax.set_title(f"{name} fitted curve")
         add_sim_metric_box(ax, sim_metric_text(name, fit, metrics))
         fig.tight_layout()
-        fig.savefig(out_dir / f"sim_{name}_fitted_rotated.png")
+        curve_png = out_dir / f"sim_{name}_fitted_rotated.png"
+        fig.savefig(curve_png)
+        fig.savefig(CSV_PNG_DIR / curve_png.name)
         plt.close(fig)
+        fitted_summary = {
+            "name": name,
+            **fit,
+            **metrics,
+            "fit_png": str(curve_png),
+            "fit_output_png": str(CSV_PNG_DIR / curve_png.name),
+        }
+        (out_dir / f"{name}_fitted_summary.json").write_text(json.dumps(fitted_summary, indent=2), encoding="utf-8")
 
     (out_dir / "sim_fitted_summary.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
     return rows
@@ -266,13 +436,6 @@ def point_distance_metrics(points: np.ndarray) -> dict:
         "net_dx_px": net_dx,
         "net_dy_px": net_dy,
     }
-
-
-def safe_read_summary(summary_path: Path) -> dict:
-    try:
-        return json.loads(summary_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
 
 
 def real_speed_from_summary(summary_data: dict, distance_metrics: dict) -> float | None:
@@ -387,10 +550,22 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
         if radius_m is None and fit["radius"] is not None:
             radius_m = float(fit["radius"]) / PX_PER_M
         speed_m_s = real_speed_from_summary(summary_data, distance_metrics)
-        summary.update({"fit_kind": "circle", "radius_px": fit["radius"], "radius_m": radius_m, "rmse_px": fit["rmse"], "rmse_m": fit["rmse"] / PX_PER_M, "arc_deg": fit["arc_deg"], "speed_m_s": speed_m_s})
+        yaw_metrics = add_fitted_yaw_rate_metrics(fit, {"duration_s": distance_metrics.get("duration_s", 0.0)}, None)
+        summary.update({
+            "fit_kind": "circle",
+            "radius_px": fit["radius"],
+            "radius_m": radius_m,
+            "rmse_px": fit["rmse"],
+            "rmse_m": fit["rmse"] / PX_PER_M,
+            "arc_deg": fit["arc_deg"],
+            "speed_m_s": speed_m_s,
+            **yaw_metrics,
+        })
         radius_text = "nan" if radius_m is None else f"{radius_m:.3f} m"
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
-        draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"arc = {fit['arc_deg']:.1f} deg", f"RMSE = {fit['rmse']:.1f}px"])
+        fitted_yaw = summary.get("fitted_yaw_rate_rad_s")
+        yaw_text = "nan" if fitted_yaw is None else f"{fitted_yaw:.3f} rad/s"
+        draw_metric_box(frame, [f"R = {radius_text}", f"v = {speed_text}", f"yaw_fit = {yaw_text}", f"arc = {fit['arc_deg']:.1f} deg", f"RMSE = {fit['rmse']:.1f}px"])
         out_img = out_dir / f"video_{stem}_fit_curve.png"
         out_json = out_dir / f"video_{stem}_fit_summary.json"
     else:
@@ -407,7 +582,7 @@ def draw_real_result(video_path: Path, summary_path: Path, out_dir: Path, label:
         summary.update({"fit_kind": "line", "radius_m": None, "forward_distance_m": float(forward_m), "forward_speed_m_s": speed_m_s, "rmse_px": summary_data.get("rmse_px")})
         speed_text = "nan" if speed_m_s is None else f"{speed_m_s:.3f} m/s"
         rmse_value = summary_data.get("rmse_px", 0.0) or 0.0
-        draw_metric_box(frame, ["R = ∞ m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {rmse_value:.1f}px"])
+        draw_metric_box(frame, ["R = ??m", f"v = {speed_text}", f"forward = {float(forward_m):.3f} m", f"RMSE = {rmse_value:.1f}px"])
         out_img = out_dir / f"video_{stem}_straight_distance.png"
         out_json = out_dir / f"video_{stem}_straight_distance_summary.json"
     cv2.imwrite(str(out_img), frame)
@@ -433,12 +608,17 @@ def dynamic_real_configs(video_analysis_dir: Path, recordings_dir: Path):
 
 def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: Path):
     rows = []
-    dynamic_configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
-    configs = dynamic_configs if dynamic_configs else []
+    configs = dynamic_real_configs(video_analysis_dir, recordings_dir)
     if not configs:
         for config in REAL_VIDEO_CONFIGS:
             stem = config["stem"]
-            configs.append({"stem": stem, "label": config["label"], "kind": config["kind"], "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json", "video_path": recordings_dir / f"{stem}.mp4"})
+            configs.append({
+                "stem": stem,
+                "label": config["label"],
+                "kind": config["kind"],
+                "summary_path": video_analysis_dir / stem / "tracked_center_summary_cleaned_physical.json",
+                "video_path": recordings_dir / f"{stem}.mp4",
+            })
     for config in configs:
         label = config["label"]
         kind = config["kind"]
@@ -458,7 +638,8 @@ def import_real_videos(video_analysis_dir: Path, recordings_dir: Path, out_dir: 
         if summary.get("kind") == "turn":
             radius = "nan" if summary.get("radius_m") is None else f"{summary['radius_m']:.3f}m"
             speed = "nan" if summary.get("speed_m_s") is None else f"{summary['speed_m_s']:.3f}m/s"
-            print(f"{label}: radius={radius} speed={speed} arc={summary.get('arc_deg', 0.0):.1f}deg rmse={summary.get('rmse_px', 0.0):.3f}px points={summary['point_count']}")
+            fitted_yaw = "nan" if summary.get("fitted_yaw_rate_rad_s") is None else f"{summary['fitted_yaw_rate_rad_s']:.3f}rad/s"
+            print(f"{label}: radius={radius} speed={speed} fitted_yaw={fitted_yaw} arc={summary.get('arc_deg', 0.0):.1f}deg rmse={summary.get('rmse_px', 0.0):.3f}px points={summary['point_count']}")
         else:
             speed = "nan" if summary.get("forward_speed_m_s") is None else f"{summary['forward_speed_m_s']:.3f}m/s"
             print(f"{label}: R=inf speed={speed} forward={summary.get('forward_distance_m', 0.0):.3f}m duration={summary['duration_s']:.3f}s points={summary['point_count']}")
@@ -477,11 +658,27 @@ def main():
     if sim_rows:
         print(out_dir / "sim_fitted_curves_rotated.png")
     for row in sim_rows:
-        radius = "R=∞m" if row["radius"] is None else f"R={row['radius']:.3f}m"
+        radius = "R=?" if row["radius"] is None else f"R={row['radius']:.3f}m"
+        target = row.get("target_yaw_rate_rad_s")
+        fitted = row.get("fitted_yaw_rate_rad_s")
+        err = row.get("fitted_yaw_rate_error_rad_s")
+        target_radius = row.get("target_radius_m")
+        radius_err = row.get("fitted_radius_error_m")
+        yaw_text = ""
+        if fitted is not None:
+            if target is None:
+                yaw_text = f" fitted_yaw={fitted:.3f}rad/s"
+            else:
+                yaw_text = f" fitted_yaw={fitted:.3f}rad/s target={target:.3f}rad/s err={err:.3f}rad/s"
+        if target_radius is not None:
+            radius_err_text = "nan" if radius_err is None else f"{radius_err:.3f}m"
+            print(f"{row['name']}: target_radius={target_radius:.3f}m r_err={radius_err_text}")
         if row["radius"] is None or row["name"] == "straight":
-            print(f"{row['name']}: line R=∞m forward_distance={row['forward_displacement_m']:.3f}m forward_speed={row['mean_forward_speed_m_s']:.3f}m/s lateral_drift={row['lateral_drift_m']:.3f}m rmse={row['rmse']:.4f}")
+            print(f"{row['name']}: line R=? forward_distance={row['forward_displacement_m']:.3f}m forward_speed={row['mean_forward_speed_m_s']:.3f}m/s lateral_drift={row['lateral_drift_m']:.3f}m rmse={row['rmse']:.4f}{yaw_text}")
         else:
-            print(f"{row['name']}: {row['kind']} {radius} arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} speed={row['mean_speed_m_s']:.3f}m/s")
+            fit_speed = row.get("fitted_speed_m_s")
+            speed_text = "nan" if fit_speed is None else f"{fit_speed:.3f}m/s"
+            print(f"{row['name']}: {row['kind']} {radius} arc={row['arc_deg']:.1f}deg rmse={row['rmse']:.4f} fit_speed={speed_text}{yaw_text}")
     straight_row = next((row for row in sim_rows if row["name"] == "straight"), None)
     if straight_row is not None:
         print("\nSim straight swimming speed summary")
