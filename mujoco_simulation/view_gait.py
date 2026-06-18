@@ -22,6 +22,9 @@ def parse_args():
     parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
     parser.add_argument("--print-contacts", action="store_true")
     parser.add_argument("--viewer-fps", type=float, default=60.0, help="Viewer render FPS used for real-time pacing.")
+    parser.add_argument("--camera-mode", choices=("fixed", "follow"), default="fixed")
+    parser.add_argument("--camera-distance", type=float, default=1.4)
+    parser.add_argument("--camera-elevation", type=float, default=-70.0)
     parser.add_argument(
         "--contact-ignore-seconds",
         type=float,
@@ -121,8 +124,8 @@ def main():
     with mujoco.viewer.launch_passive(model, data) as viewer:
         with viewer.lock():
             viewer.cam.lookat[:] = np.array([args.start_x, args.start_y, -0.02])
-            viewer.cam.distance = 1.4
-            viewer.cam.elevation = -70
+            viewer.cam.distance = args.camera_distance
+            viewer.cam.elevation = args.camera_elevation
             viewer.cam.azimuth = 0
 
         target_fps = max(args.viewer_fps, 1.0)
@@ -167,9 +170,10 @@ def main():
                 )
                 last_print = now
 
-            with viewer.lock():
-                viewer.cam.lookat[0] = base_pos[0]
-                viewer.cam.lookat[1] = base_pos[1]
+            if args.camera_mode == "follow":
+                with viewer.lock():
+                    viewer.cam.lookat[0] = base_pos[0]
+                    viewer.cam.lookat[1] = base_pos[1]
             viewer.sync()
 
             elapsed = time.perf_counter() - frame_start

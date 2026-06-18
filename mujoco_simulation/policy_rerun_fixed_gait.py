@@ -24,7 +24,7 @@ from plot_fitted_gait_curves import (
 from rl_policy_exporter import write_gait_json
 from rl_turning_env import EelTurningRLEnv, TurningConfig, direction_sign
 
-
+#載入訓練
 def rollout_policy_with_actions(model_zip: Path, cfg: TurningConfig) -> tuple[np.ndarray, float]:
     from stable_baselines3 import PPO
 
@@ -71,7 +71,7 @@ def steady_actions_and_rewards(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return actions, rewards
 
 
-def mean_action_gait(
+def mean_action_gait(#把訓練後8s的參數平均變固定參數
     *,
     name: str,
     cfg: TurningConfig,
@@ -187,7 +187,7 @@ def write_policy_rerun_outputs(
     }
 
 
-def write_mean_fixed_gait_from_best_policy(
+def write_mean_fixed_gait_from_best_policy(#寫josn檔
     *,
     name: str,
     cfg: TurningConfig,

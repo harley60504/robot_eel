@@ -57,7 +57,7 @@ DETAILED_EVAL_FIELDS = [
 ]
 
 
-class DetailedEvalMetricsCallback(BaseCallback):
+class DetailedEvalMetricsCallback(BaseCallback):#紀錄訓練
     """Write reward-component eval diagnostics that EvalCallback's npz omits."""
 
     def __init__(
@@ -243,7 +243,7 @@ class DetailedEvalMetricsCallback(BaseCallback):
         summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
-def parse_args():
+def parse_args():#命令行指令
     parser = argparse.ArgumentParser(description="Train PPO on open-loop turning gait reward.")
     parser.add_argument("--timesteps", type=int, default=150_000)
     parser.add_argument("--output", type=Path, default=Path("outputs/zips/ppo_turn_left_shape_bias"))
@@ -276,7 +276,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def config_from_args(args) -> TurningConfig:
+def config_from_args(args) -> TurningConfig:#環境檔參數檔
     cfg = TurningConfig()
     cfg.turn_direction = args.turn_direction
     cfg.target_yaw_rate = abs(float(args.target_yaw_rate))
@@ -371,7 +371,7 @@ def make_eval_callback(args, cfg: TurningConfig) -> tuple[BaseCallback | None, P
     return CallbackList([eval_callback, debug_callback]), eval_log_dir, plot_output, debug_output
 
 
-def main():
+def main():#訓練入口
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     cfg = config_from_args(args)

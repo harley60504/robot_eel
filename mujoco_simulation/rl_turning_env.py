@@ -89,7 +89,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
 
     metadata = {"render_modes": []}
 
-    def __init__(self, config: TurningConfig | None = None):
+    def __init__(self, config: TurningConfig | None = None):#接入mujoco
         if gym is None or spaces is None:
             raise ImportError("Install gymnasium first: python -m pip install gymnasium")
 
@@ -114,7 +114,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.max_steps = max(1, int(round(self.cfg.episode_seconds / self.cfg.control_dt)))
         self.warmup_steps = max(0, int(round(self.cfg.warmup_seconds / self.cfg.control_dt)))
         self.step_count = 0
-        self.action_dim = 6
+        self.action_dim = 6 #輸出6項
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
         self.cpg = HopfCPG(num_joints=6)
         self.metric_window = deque(
@@ -124,7 +124,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             maxlen=max(2, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)) + 1)
         )
 
-        if self.cfg.normalized_actions:
+        if self.cfg.normalized_actions:#範圍是1~-1
             self.action_space = spaces.Box(
                 low=-np.ones(self.action_dim, dtype=np.float32),
                 high=np.ones(self.action_dim, dtype=np.float32),
@@ -158,7 +158,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.position_window.append((float(self.data.time), float(base_pos[0]), float(base_pos[1])))
         return self._obs(), {}
 
-    def step(self, action):
+    def step(self, action):#寫入cpg和寫入mujoco
         action = np.asarray(action, dtype=np.float64)
         action = np.clip(action, self.action_space.low, self.action_space.high)
         physical_action = self._physical_action(action)
@@ -166,7 +166,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         amp_scales = tuple(float(value) for value in self.cfg.fixed_amp_scales)
         phase_lags = tuple(float(value) for value in self.cfg.fixed_phase_lags)
 
-        params = HopfCPGParams(
+        params = HopfCPGParams(#把參數給入cpg
             frequency=self.cfg.fixed_frequency,
             wavelength=self.cfg.fixed_wavelength,
             ajoint=self.cfg.fixed_ajoint,
@@ -176,7 +176,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         )
 
         for _ in range(self.sim_steps_per_control):
-            targets = self.cpg.step(self.data.time, self.model.opt.timestep, params)
+            targets = self.cpg.step(self.data.time, self.model.opt.timestep, params)#算每個servo角度
             self.data.ctrl[self.tail_ctrl_slice] = np.clip(targets, -1.2, 1.2)
             mujoco.mj_step(self.model, self.data)
 
@@ -197,7 +197,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         signed_turn_rate = np.sign(target_yaw_rate) * avg_body_yaw_rate
         correct_turn_direction = signed_turn_rate > 1e-6
         self.prev_action = action.copy()
-
+        #reward方法
         signed_turn_radius = np.inf
         turn_radius = np.inf
         signed_target_radius = None
@@ -286,7 +286,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         bias_lows = np.full(6, float(self.cfg.joint_bias_low), dtype=np.float64)
         bias_highs = np.full(6, float(self.cfg.joint_bias_high), dtype=np.float64)
         return bias_lows, bias_highs
-  
+    # 把-1~1轉成-0.35~0.35rad
     def _physical_action(self, action: np.ndarray) -> np.ndarray:
         if not self.cfg.normalized_actions:
             return action.astype(np.float64)
