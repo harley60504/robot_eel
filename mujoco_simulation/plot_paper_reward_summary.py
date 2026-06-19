@@ -101,7 +101,7 @@ def write_group_csv(path: Path, steps: np.ndarray, mean: np.ndarray, low: np.nda
 
 def group_label(mode: str, direction: str, target: str) -> str:
     if mode == "yaw":
-        return f"{direction.capitalize()} yaw {float(target):.1f}"
+        return f"{direction.capitalize()} yaw_rate {float(target):.1f}"
     return f"{direction.capitalize()} radius {float(target):.1f}"
 
 

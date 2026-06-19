@@ -1,14 +1,6 @@
 {
-  "status": "running",
-  "condition_index": 2,
-  "run_count": 18,
-  "current": {
-    "name": "paper_ppo_turn_right_a20_y05_run08",
-    "mode": "yaw",
-    "direction": "right",
-    "target": 0.5,
-    "status": "running",
-    "started_at": "2026-06-18 13:11:36"
-  },
-  "updated_at": "2026-06-18 13:11:36"
+  "status": "complete",
+  "total_runs": 40,
+  "reward_summary_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\paper_reward_summary\\paper_reward_mean_ci95.png",
+  "finished_at": "2026-06-18 18:28:17"
 }
