@@ -175,10 +175,6 @@ def summarize(arr: np.ndarray, warmup_seconds: float):
 
 
 def draw_environment(ax, start_x: float, start_y: float):
-    ax.set_xlim(-0.1, 3.1)
-    ax.set_ylim(-0.85, 0.85)
-    ax.add_patch(plt.Rectangle((-1.5, -0.75), 3.0, 1.5, fill=False, color="#7f1d1d", linewidth=1.4))
-    ax.scatter([0.40, 2.60, 2.60, 0.40], [-0.35, -0.35, 0.35, 0.35], s=18, color="#facc15", alpha=0.45)
     ax.scatter([start_x], [start_y], s=28, color="#22c55e", edgecolor="black", zorder=3)
 
 

@@ -1,0 +1,14 @@
+{
+  "status": "running",
+  "condition_index": 4,
+  "run_count": 38,
+  "current": {
+    "name": "paper80_ppo_turn_right_a20_y07_run08",
+    "mode": "yaw",
+    "direction": "right",
+    "target": 0.7,
+    "status": "running",
+    "started_at": "2026-06-20 02:32:28"
+  },
+  "updated_at": "2026-06-20 02:32:28"
+}

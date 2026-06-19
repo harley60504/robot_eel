@@ -254,7 +254,7 @@ def write_trajectory_plot(job: dict, gait_path: Path) -> dict:
     ax.grid(True, alpha=0.25)
     ax.set_xlabel("x (m)")
     ax.set_ylabel("y (m)")
-    ax.set_title(f"{job['name']} trajectory until wall contact")
+    ax.set_title(f"{job['name']} fixed gait trajectory")
     fig.tight_layout()
     fig.savefig(png_path)
     plt.close(fig)

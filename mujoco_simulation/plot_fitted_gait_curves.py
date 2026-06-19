@@ -227,19 +227,7 @@ def add_fitted_radius_metrics(fit: dict, target_radius_m: float | None = None) -
 
 
 def draw_rotated_tank(ax):
-    ax.add_patch(
-        plt.Rectangle(
-            (-TANK_LATERAL_HALF, TANK_FORWARD_MIN),
-            2.0 * TANK_LATERAL_HALF,
-            TANK_FORWARD_MAX - TANK_FORWARD_MIN,
-            fill=False,
-            color="#7f1d1d",
-            linewidth=1.5,
-        )
-    )
     ax.scatter([START_LATERAL_M], [START_FORWARD_M], s=32, color="#22c55e", edgecolor="black", zorder=4)
-    ax.set_xlim(-TANK_LATERAL_HALF - 0.10, TANK_LATERAL_HALF + 0.10)
-    ax.set_ylim(TANK_FORWARD_MIN - 0.10, TANK_FORWARD_MAX + 0.10)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.22)
     ax.set_xlabel("lateral (m)")
