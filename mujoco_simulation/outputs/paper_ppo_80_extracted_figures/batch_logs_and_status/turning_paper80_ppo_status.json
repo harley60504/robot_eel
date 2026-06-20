@@ -1,0 +1,7 @@
+{
+  "status": "complete",
+  "total_runs": 80,
+  "reward_summary_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\paper80_ppo_reward_summary\\paper_reward_mean_ci95.png",
+  "organized_dir": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_80_extracted_figures",
+  "finished_at": "2026-06-20 10:31:55"
+}
