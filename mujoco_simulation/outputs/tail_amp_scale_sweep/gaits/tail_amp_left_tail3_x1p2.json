@@ -1,0 +1,41 @@
+{
+  "name": "tail_amp_left_tail3_x1p2",
+  "ajoint": 20.0,
+  "freq": 1.0,
+  "wavelength": 1.6275,
+  "amp_scales": [
+    1.24,
+    1.08,
+    1.0,
+    1.26,
+    1.32,
+    1.44
+  ],
+  "phase_lags": [
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439
+  ],
+  "joint_bias": [
+    0.08,
+    0.1,
+    0.12,
+    0.14,
+    0.16,
+    0.18
+  ],
+  "source": {
+    "type": "tail_amp_scale_sweep",
+    "base_gait": "turn_left",
+    "direction": "left",
+    "profile": "tail3",
+    "tail_multiplier": 1.2,
+    "changed_joint_indices_1based": [
+      4,
+      5,
+      6
+    ]
+  }
+}

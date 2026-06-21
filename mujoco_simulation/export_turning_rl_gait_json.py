@@ -39,12 +39,16 @@ def parse_args():
     parser.add_argument("--freq", type=float, default=None)
     parser.add_argument("--wavelength", type=float, default=None)
     parser.add_argument("--ajoint", type=float, default=None, help="Base joint angle amplitude in degrees.")
+    parser.add_argument("--action-mode", choices=("bias_only", "bias_tail2_amp", "bias_tail3_amp"), default=None)
+    parser.add_argument("--fixed-amp-scales", type=lambda value: parse_float_list(value, 6, "fixed-amp-scales"), default=None)
     parser.add_argument("--amp-scale-lows", type=lambda value: parse_float_list(value, 6, "amp-scale-lows"), default=None)
     parser.add_argument("--amp-scale-highs", type=lambda value: parse_float_list(value, 6, "amp-scale-highs"), default=None)
     parser.add_argument("--phase-lag-lows", type=lambda value: parse_float_list(value, 5, "phase-lag-lows"), default=None)
     parser.add_argument("--phase-lag-highs", type=lambda value: parse_float_list(value, 5, "phase-lag-highs"), default=None)
     parser.add_argument("--joint-bias-low", type=float, default=None)
     parser.add_argument("--joint-bias-high", type=float, default=None)
+    parser.add_argument("--tail-amp-multiplier-low", type=float, default=None)
+    parser.add_argument("--tail-amp-multiplier-high", type=float, default=None)
     parser.add_argument("--boundary-x-min", type=float, default=None)
     parser.add_argument("--boundary-x-max", type=float, default=None)
     parser.add_argument("--boundary-y", type=float, default=None)
@@ -68,6 +72,10 @@ def config_from_args(args) -> TurningConfig:
         cfg.fixed_wavelength = args.wavelength
     if args.ajoint is not None:
         cfg.fixed_ajoint = degrees_to_radians(args.ajoint)
+    if args.action_mode is not None:
+        cfg.action_mode = args.action_mode
+    if args.fixed_amp_scales is not None:
+        cfg.fixed_amp_scales = tuple(args.fixed_amp_scales)
     if args.amp_scale_lows is not None:
         cfg.amp_scale_lows = args.amp_scale_lows
     if args.amp_scale_highs is not None:
@@ -80,6 +88,10 @@ def config_from_args(args) -> TurningConfig:
         cfg.joint_bias_low = args.joint_bias_low
     if args.joint_bias_high is not None:
         cfg.joint_bias_high = args.joint_bias_high
+    if args.tail_amp_multiplier_low is not None:
+        cfg.tail_amp_multiplier_low = args.tail_amp_multiplier_low
+    if args.tail_amp_multiplier_high is not None:
+        cfg.tail_amp_multiplier_high = args.tail_amp_multiplier_high
     if args.boundary_x_min is not None:
         cfg.boundary_x_min = args.boundary_x_min
     if args.boundary_x_max is not None:
@@ -95,7 +107,16 @@ def round_list(values: np.ndarray, digits: int) -> list[float]:
 
 
 def summarize_metric(rows: list[dict[str, Any]], key: str) -> float | None:
-    values = [float(row[key]) for row in rows if key in row and np.isfinite(float(row[key]))]
+    values = []
+    for row in rows:
+        if key not in row or row[key] is None:
+            continue
+        try:
+            value = float(row[key])
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(value):
+            values.append(value)
     if not values:
         return None
     return float(np.mean(values))
@@ -157,6 +178,21 @@ def split_policy_action(selected: np.ndarray, cfg: TurningConfig) -> tuple[np.nd
     if selected.shape[0] == 6:
         return (
             np.asarray(cfg.fixed_amp_scales, dtype=np.float64),
+            np.asarray(cfg.fixed_phase_lags, dtype=np.float64),
+            selected[:6],
+        )
+    if cfg.action_mode in {"bias_tail2_amp", "bias_tail3_amp"} and selected.shape[0] in {8, 9}:
+        amp_scales = np.asarray(cfg.fixed_amp_scales, dtype=np.float64).copy()
+        tail_indices = (4, 5) if cfg.action_mode == "bias_tail2_amp" else (3, 4, 5)
+        if selected.shape[0] != 6 + len(tail_indices):
+            raise ValueError(
+                f"action_mode {cfg.action_mode} expects action size {6 + len(tail_indices)}, "
+                f"got {selected.shape[0]}"
+            )
+        for offset, joint_index in enumerate(tail_indices):
+            amp_scales[joint_index] *= selected[6 + offset]
+        return (
+            amp_scales,
             np.asarray(cfg.fixed_phase_lags, dtype=np.float64),
             selected[:6],
         )

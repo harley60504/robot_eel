@@ -1,0 +1,29 @@
+{
+  "name": "straight_a20_zero_bias",
+  "gait_json": "outputs\\paper_straight_zero_bias\\gaits\\straight.json",
+  "video_mp4": "outputs\\paper_straight_zero_bias\\swim_recording\\straight_a20_zero_bias_swim_18s.mp4",
+  "snapshots_dir": "outputs\\paper_straight_zero_bias\\swim_recording\\straight_a20_zero_bias_snapshots",
+  "snapshot_count": 9,
+  "trajectory_csv": "outputs\\paper_straight_zero_bias\\swim_recording\\straight_a20_zero_bias_swim_18s_trajectory.csv",
+  "seconds": 18.0,
+  "fps": 60.0,
+  "width": 1280,
+  "height": 720,
+  "wall_collision": false,
+  "hidden_visual_prefixes": [
+    "wall_",
+    "course_",
+    "corner_marker",
+    "start_marker"
+  ],
+  "floor_half_extents_m": [
+    4.0,
+    3.0
+  ],
+  "camera_mode": "follow",
+  "camera_lookat": [
+    0.6,
+    0.0,
+    -0.02
+  ]
+}

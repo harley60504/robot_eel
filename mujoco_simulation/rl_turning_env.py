@@ -64,8 +64,11 @@ class TurningConfig:
     # to bend the body for turning.
     fixed_amp_scales: tuple[float, ...] = (1.225, 1.075, 1.000, 1.075, 1.150, 1.225)
     fixed_phase_lags: tuple[float, ...] = (0.614439, 0.614439, 0.614439, 0.614439, 0.614439)
+    action_mode: str = "bias_only"
     joint_bias_low: float = -0.35
     joint_bias_high: float = 0.35
+    tail_amp_multiplier_low: float = 0.90
+    tail_amp_multiplier_high: float = 1.40
 
     reward_average_seconds: float = 1.0
     yaw_rate_weight: float = 1.20
@@ -80,7 +83,14 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
     """Train open-loop turning gaits by learning only static joint bias.
 
     Action layout:
-        0:6  joint_bias in radians
+        bias_only:
+            0:6  joint_bias in radians
+        bias_tail2_amp:
+            0:6  joint_bias in radians
+            6:8  amp_scale multiplier for joints 5-6
+        bias_tail3_amp:
+            0:6  joint_bias in radians
+            6:9  amp_scale multiplier for joints 4-6
 
     Amplitude and inter-joint phase lags are fixed by TurningConfig.  Positive
     target yaw rate is treated as left/CCW turning.  Negative target yaw rate is
@@ -114,7 +124,8 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.max_steps = max(1, int(round(self.cfg.episode_seconds / self.cfg.control_dt)))
         self.warmup_steps = max(0, int(round(self.cfg.warmup_seconds / self.cfg.control_dt)))
         self.step_count = 0
-        self.action_dim = 6 #輸出6項
+        self.tail_amp_indices = self._tail_amp_indices()
+        self.action_dim = 6 + len(self.tail_amp_indices) #輸出6項bias，可選尾端amp
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
         self.cpg = HopfCPG(num_joints=6)
         self.metric_window = deque(
@@ -163,7 +174,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         action = np.clip(action, self.action_space.low, self.action_space.high)
         physical_action = self._physical_action(action)
         joint_bias = tuple(float(value) for value in physical_action[:6])
-        amp_scales = tuple(float(value) for value in self.cfg.fixed_amp_scales)
+        amp_scales = self._amp_scales_from_physical_action(physical_action)
         phase_lags = tuple(float(value) for value in self.cfg.fixed_phase_lags)
 
         params = HopfCPGParams(#把參數給入cpg
@@ -254,6 +265,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             "steady_state": steady_state,
             "physical_action": physical_action.astype(np.float32),
             "joint_bias": np.asarray(joint_bias, dtype=np.float32),
+            "tail_amp_multipliers": np.asarray(physical_action[6:], dtype=np.float32),
             "fixed_amp_scales": np.asarray(amp_scales, dtype=np.float32),
             "fixed_phase_lags": np.asarray(phase_lags, dtype=np.float32),
             "reward_yaw_rate": reward_yaw_rate,
@@ -277,15 +289,22 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             raise ValueError("fixed_amp_scales must have 6 values")
         if len(self.cfg.fixed_phase_lags) != 5:
             raise ValueError("fixed_phase_lags must have 5 values")
+        if self.cfg.action_mode not in {"bias_only", "bias_tail2_amp", "bias_tail3_amp"}:
+            raise ValueError("action_mode must be bias_only, bias_tail2_amp, or bias_tail3_amp")
         if self.cfg.target_radius is not None and self.cfg.target_radius <= 0:
             raise ValueError("target_radius must be greater than 0")
         if self.cfg.joint_bias_low > self.cfg.joint_bias_high:
             raise ValueError("joint_bias_low cannot be greater than joint_bias_high")
+        if self.cfg.tail_amp_multiplier_low > self.cfg.tail_amp_multiplier_high:
+            raise ValueError("tail_amp_multiplier_low cannot be greater than tail_amp_multiplier_high")
 
     def _action_bounds(self) -> tuple[np.ndarray, np.ndarray]:
         bias_lows = np.full(6, float(self.cfg.joint_bias_low), dtype=np.float64)
         bias_highs = np.full(6, float(self.cfg.joint_bias_high), dtype=np.float64)
-        return bias_lows, bias_highs
+        amp_count = len(self.tail_amp_indices)
+        amp_lows = np.full(amp_count, float(self.cfg.tail_amp_multiplier_low), dtype=np.float64)
+        amp_highs = np.full(amp_count, float(self.cfg.tail_amp_multiplier_high), dtype=np.float64)
+        return np.concatenate((bias_lows, amp_lows)), np.concatenate((bias_highs, amp_highs))
     # 把-1~1轉成-0.35~0.35rad
     def _physical_action(self, action: np.ndarray) -> np.ndarray:
         if not self.cfg.normalized_actions:
@@ -293,6 +312,19 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         lows, highs = self._action_bounds()
         unit = 0.5 * (action + 1.0)
         return lows + unit * (highs - lows)
+
+    def _tail_amp_indices(self) -> tuple[int, ...]:
+        if self.cfg.action_mode == "bias_tail2_amp":
+            return (4, 5)
+        if self.cfg.action_mode == "bias_tail3_amp":
+            return (3, 4, 5)
+        return ()
+
+    def _amp_scales_from_physical_action(self, physical_action: np.ndarray) -> tuple[float, ...]:
+        amp_scales = list(float(value) for value in self.cfg.fixed_amp_scales)
+        for offset, joint_index in enumerate(self.tail_amp_indices):
+            amp_scales[joint_index] *= float(physical_action[6 + offset])
+        return tuple(amp_scales)
 
     def _obs(self) -> np.ndarray:
         q = self.data.qpos[self.tail_qpos_addr]

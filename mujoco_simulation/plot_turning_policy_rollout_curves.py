@@ -67,10 +67,15 @@ def cfg_from_gait_json(gait_path: Path) -> TurningConfig:
         "boundary_y",
         "joint_bias_low",
         "joint_bias_high",
+        "tail_amp_multiplier_low",
+        "tail_amp_multiplier_high",
     ):
         value = safe_float(env_config.get(attr))
         if value is not None:
             setattr(cfg, attr, value)
+    action_mode = env_config.get("action_mode")
+    if isinstance(action_mode, str) and action_mode:
+        cfg.action_mode = action_mode
     ajoint = safe_float(env_config.get("fixed_ajoint"))
     if ajoint is not None:
         cfg.fixed_ajoint = ajoint

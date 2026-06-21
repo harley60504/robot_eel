@@ -1,0 +1,22 @@
+{
+  "name": "straight_a20_zero_bias",
+  "gait_json": "C:\\robot_eel\\mujoco_simulation\\outputs\\paper_straight_zero_bias\\gaits\\straight.json",
+  "ajoint_deg": 20.0,
+  "joint_bias": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "duration_s": 15.998999999999125,
+  "warmup_s": 2.0,
+  "fitted_straight_speed_m_s": 0.1900810718871875,
+  "net_speed_m_s": 0.19008107948315503,
+  "fitted_distance_m": 3.0411070691229467,
+  "net_distance_m": 3.041107190650831,
+  "line_rmse_m": 0.03656543669098196,
+  "lateral_span_m": 0.10531945886565813,
+  "hit_wall": false
+}

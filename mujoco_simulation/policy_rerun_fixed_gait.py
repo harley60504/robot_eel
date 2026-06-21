@@ -24,6 +24,23 @@ from plot_fitted_gait_curves import (
 from rl_policy_exporter import write_gait_json
 from rl_turning_env import EelTurningRLEnv, TurningConfig, direction_sign
 
+
+def split_mean_turning_action(actions: np.ndarray, cfg: TurningConfig) -> tuple[np.ndarray, np.ndarray]:
+    mean_action = np.mean(actions, axis=0)
+    if mean_action.shape[0] == 6:
+        return np.asarray(cfg.fixed_amp_scales, dtype=np.float64), mean_action[:6]
+    if cfg.action_mode in {"bias_tail2_amp", "bias_tail3_amp"} and mean_action.shape[0] in {8, 9}:
+        amp_scales = np.asarray(cfg.fixed_amp_scales, dtype=np.float64).copy()
+        tail_indices = (4, 5) if cfg.action_mode == "bias_tail2_amp" else (3, 4, 5)
+        if mean_action.shape[0] != 6 + len(tail_indices):
+            raise RuntimeError(
+                f"action_mode {cfg.action_mode} expects {6 + len(tail_indices)} actions, got {mean_action.shape[0]}"
+            )
+        for offset, joint_index in enumerate(tail_indices):
+            amp_scales[joint_index] *= float(mean_action[6 + offset])
+        return amp_scales, mean_action[:6]
+    raise RuntimeError(f"mean fixed gait expects 6, 8, or 9 actions, got {mean_action.shape[0]}")
+
 #載入訓練
 def rollout_policy_with_actions(model_zip: Path, cfg: TurningConfig) -> tuple[np.ndarray, float]:
     from stable_baselines3 import PPO
@@ -81,9 +98,7 @@ def mean_action_gait(#把訓練後8s的參數平均變固定參數
     source_extra: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     actions, rewards = steady_actions_and_rewards(arr)
-    joint_bias = np.mean(actions, axis=0)
-    if joint_bias.shape[0] != 6:
-        raise RuntimeError(f"mean fixed gait expects 6 bias actions, got {joint_bias.shape[0]}")
+    amp_scales, joint_bias = split_mean_turning_action(actions, cfg)
 
     diagnostics = {
         "steady_action_count": int(actions.shape[0]),
@@ -110,7 +125,7 @@ def mean_action_gait(#把訓練後8s的參數平均變固定參數
         "ajoint": float(np.degrees(cfg.fixed_ajoint)),
         "freq": float(cfg.fixed_frequency),
         "wavelength": float(cfg.fixed_wavelength),
-        "amp_scales": [float(value) for value in cfg.fixed_amp_scales],
+        "amp_scales": [float(value) for value in amp_scales],
         "phase_lags": [float(value) for value in cfg.fixed_phase_lags],
         "joint_bias": [float(value) for value in joint_bias],
         "source": source,

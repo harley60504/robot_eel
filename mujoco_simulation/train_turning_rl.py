@@ -256,12 +256,16 @@ def parse_args():#命令行指令
     parser.add_argument("--freq", type=float, default=None)
     parser.add_argument("--wavelength", type=float, default=None)
     parser.add_argument("--ajoint", type=float, default=None, help="Base joint angle amplitude in degrees.")
+    parser.add_argument("--action-mode", choices=("bias_only", "bias_tail2_amp", "bias_tail3_amp"), default=None)
+    parser.add_argument("--fixed-amp-scales", type=lambda value: parse_float_list(value, 6, "fixed-amp-scales"), default=None)
     parser.add_argument("--amp-scale-lows", type=lambda value: parse_float_list(value, 6, "amp-scale-lows"), default=None)
     parser.add_argument("--amp-scale-highs", type=lambda value: parse_float_list(value, 6, "amp-scale-highs"), default=None)
     parser.add_argument("--phase-lag-lows", type=lambda value: parse_float_list(value, 5, "phase-lag-lows"), default=None)
     parser.add_argument("--phase-lag-highs", type=lambda value: parse_float_list(value, 5, "phase-lag-highs"), default=None)
     parser.add_argument("--joint-bias-low", type=float, default=None, help="Minimum learned joint bias in radians.")
     parser.add_argument("--joint-bias-high", type=float, default=None, help="Maximum learned joint bias in radians.")
+    parser.add_argument("--tail-amp-multiplier-low", type=float, default=None)
+    parser.add_argument("--tail-amp-multiplier-high", type=float, default=None)
     parser.add_argument("--yaw-rate-weight", type=float, default=None)
     parser.add_argument("--radius-weight", type=float, default=None)
     parser.add_argument("--reward-average-seconds", type=float, default=None)
@@ -294,6 +298,10 @@ def config_from_args(args) -> TurningConfig:#環境檔參數檔
         cfg.fixed_wavelength = args.wavelength
     if args.ajoint is not None:
         cfg.fixed_ajoint = degrees_to_radians(args.ajoint)
+    if args.action_mode is not None:
+        cfg.action_mode = args.action_mode
+    if args.fixed_amp_scales is not None:
+        cfg.fixed_amp_scales = tuple(args.fixed_amp_scales)
     if args.amp_scale_lows is not None:
         cfg.amp_scale_lows = args.amp_scale_lows
     if args.amp_scale_highs is not None:
@@ -306,8 +314,14 @@ def config_from_args(args) -> TurningConfig:#環境檔參數檔
         cfg.joint_bias_low = args.joint_bias_low
     if args.joint_bias_high is not None:
         cfg.joint_bias_high = args.joint_bias_high
+    if args.tail_amp_multiplier_low is not None:
+        cfg.tail_amp_multiplier_low = args.tail_amp_multiplier_low
+    if args.tail_amp_multiplier_high is not None:
+        cfg.tail_amp_multiplier_high = args.tail_amp_multiplier_high
     if cfg.joint_bias_low > cfg.joint_bias_high:
         raise ValueError("joint-bias-low cannot be greater than joint-bias-high")
+    if cfg.tail_amp_multiplier_low > cfg.tail_amp_multiplier_high:
+        raise ValueError("tail-amp-multiplier-low cannot be greater than tail-amp-multiplier-high")
 
     # If the user trains only one direction, bias bounds can stay symmetric.
     # The reward's signed target yaw rate decides which side is useful.
