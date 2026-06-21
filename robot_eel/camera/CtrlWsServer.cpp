@@ -7,7 +7,6 @@
 #include "wifi_manager.h"
 #include "CtrlUartBridge.h"
 #include "config.h"
-#include "servo_csv_log.h"
 
 namespace {
 
@@ -21,6 +20,7 @@ ControlPacket g_pkt = {
     {1.24f, 1.08f, 1.0f, 1.05f, 1.1f, 1.2f},
     {0.614439f, 0.614439f, 0.614439f, 0.614439f, 0.614439f},
     {0, 0, 0, 0, 0, 0},
+    {120, 120, 120, 120, 120, 120},
     false,
     2,
     0
@@ -57,9 +57,9 @@ void CtrlWsServer::broadcastServoStatus(
     doc["type"] = "servo_status";
     doc["seq"]  = seq;   // ✅ 用控制板送來的 ServoStatus.seq
 
-    auto t = doc.createNestedArray("target");
-    auto a = doc.createNestedArray("actual");
-    auto e = doc.createNestedArray("error");
+    JsonArray t = doc.createNestedArray("target");
+    JsonArray a = doc.createNestedArray("actual");
+    JsonArray e = doc.createNestedArray("error");
 
     for (int i = 0; i < count; i++) {
         t.add(target[i]);
@@ -92,12 +92,14 @@ void CtrlWsServer::tick()
     doc["L"]         = g_pkt.L;
     doc["paused"]    = g_pkt.isPaused;
     doc["mode"]      = g_pkt.controlMode;
-    auto amps = doc.createNestedArray("ampScales");
-    auto phases = doc.createNestedArray("phaseLags");
-    auto biases = doc.createNestedArray("jointBiasDeg");
+    JsonArray amps = doc.createNestedArray("ampScales");
+    JsonArray phases = doc.createNestedArray("phaseLags");
+    JsonArray biases = doc.createNestedArray("jointBiasDeg");
+    JsonArray centers = doc.createNestedArray("servoDefaultAngles");
     for (int i = 0; i < bodyNum; i++) {
         amps.add(g_pkt.ampScales[i]);
         biases.add(g_pkt.jointBiasDeg[i]);
+        centers.add(g_pkt.servoDefaultAngles[i]);
     }
     for (int i = 0; i < bodyNum - 1; i++) {
         phases.add(g_pkt.phaseLags[i]);
@@ -119,7 +121,6 @@ void CtrlWsServer::begin(WebSocketsServer &ws)
     CtrlUartBridge::onServoStatus =
         [](const ServoStatus &s)
         {
-            appendServoCsvLog(s);
             CtrlWsServer::broadcastServoStatus(
                 s.count,
                 s.seq,
@@ -214,6 +215,43 @@ void CtrlWsServer::begin(WebSocketsServer &ws)
             if (count == 0) return;
 
             CtrlUartBridge::sendAngle(tmp, count);
+            return;
+        }
+
+        /* ================= set_servo_center ================= */
+        if (!strcmp(cmd, "set_servo_center")) {
+
+            uint32_t seq = doc["seq"] | 0;
+            bool save = doc["save"] | false;
+
+            if (g_ws) {
+                StaticJsonDocument<160> ack;
+                ack["type"] = "servo_center_ack";
+                ack["seq"]  = seq;
+                ack["save"] = save;
+                ack["esp_rx_millis"] = millis();
+
+                String out;
+                serializeJson(ack, out);
+                g_ws->sendTXT(num, out);
+            }
+
+            if (!doc.containsKey("angles")) return;
+
+            JsonArray arr = doc["angles"].as<JsonArray>();
+            if (arr.isNull()) return;
+
+            float tmp[bodyNum] = {0};
+            uint8_t count = 0;
+
+            for (JsonVariant v : arr) {
+                if (count >= bodyNum) break;
+                tmp[count++] = v.as<float>();
+            }
+
+            if (count == 0) return;
+
+            CtrlUartBridge::sendServoCenter(tmp, count, save);
             return;
         }
 

@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Preferences.h>
 #include "driver/uart.h"
 #include "freertos/semphr.h"
 
@@ -9,6 +10,7 @@
 #include "ServoStatusUART.h"
 #include "ControltoCamera.h"
 #include "AnglePacket.h"
+#include "CenterPacket.h"
 
 
 
@@ -22,6 +24,7 @@ volatile uint32_t g_servoStatusSeq = 0;
 // ==========================
 float servoDefaultAngles[bodyNum] = {120,120,120,120,120,120};
 float angleDeg[bodyNum];
+static Preferences servoCenterPrefs;
 
 // ==========================
 //  Control Parameters
@@ -64,6 +67,7 @@ static ControlRxState camCtrlRx;
 // RX state (AnglePacket)
 // ==========================
 static AngleRxState camAngleRx;
+static CenterRxState camCenterRx;
 
 // ==========================
 // UART Angle cache (shared with servoTask)
@@ -73,6 +77,56 @@ float g_uartTargetDeg[bodyNum] = {0};
 volatile uint32_t g_lastAngleSeq = 0;
 
 SemaphoreHandle_t angleMutex = NULL;
+
+void loadServoCenters()
+{
+  servoCenterPrefs.begin("servo_center", true);
+  for (int i = 0; i < bodyNum; i++)
+  {
+    char key[4];
+    snprintf(key, sizeof(key), "s%d", i);
+    servoDefaultAngles[i] = servoCenterPrefs.getFloat(key, servoDefaultAngles[i]);
+  }
+  servoCenterPrefs.end();
+
+  Serial.print("[CENTER] loaded:");
+  for (int i = 0; i < bodyNum; i++)
+  {
+    Serial.printf(" %.2f", servoDefaultAngles[i]);
+  }
+  Serial.println();
+}
+
+void saveServoCenters()
+{
+  servoCenterPrefs.begin("servo_center", false);
+  for (int i = 0; i < bodyNum; i++)
+  {
+    char key[4];
+    snprintf(key, sizeof(key), "s%d", i);
+    servoCenterPrefs.putFloat(key, servoDefaultAngles[i]);
+  }
+  servoCenterPrefs.end();
+  Serial.println("[CENTER] saved to NVS");
+}
+
+void applyServoCenters(const CenterPacket &pkt)
+{
+  if (pkt.count != bodyNum) return;
+
+  for (int i = 0; i < bodyNum; i++)
+  {
+    servoDefaultAngles[i] = constrain(pkt.centerDeg[i], 0.0f, 240.0f);
+  }
+
+  if (pkt.save)
+  {
+    saveServoCenters();
+  }
+
+  Serial.printf("[CENTER] packet OK seq=%lu save=%u\n",
+                (unsigned long)pkt.seq, (unsigned)pkt.save);
+}
 
 // ==========================
 // UART TX Task  (→ Camera): send control params
@@ -93,7 +147,8 @@ void cameraTxTask(void* pv)
       phaseLags,
       jointBiasDeg,
       isPaused,
-      (uint8_t)controlMode
+      (uint8_t)controlMode,
+      servoDefaultAngles
     );
 
     vTaskDelayUntil(&lastWake, pdMS_TO_TICKS(100));   // 10Hz
@@ -154,6 +209,16 @@ void cameraRxTask(void* pv)
       // =====================================================
       // 優先處理：如果 Control parser 正在接收，就只餵 Control
       // =====================================================
+      if (camCenterRx.receiving)
+      {
+        if (feedCenterRx(camCenterRx, b))
+        {
+          applyServoCenters(camCenterRx.pkt);
+        }
+
+        continue;
+      }
+
       if (camCtrlRx.receiving)
       {
         if (feedControlRx(camCtrlRx, b))
@@ -211,6 +276,12 @@ void cameraRxTask(void* pv)
         continue;
       }
 
+      if (b == CENTER_PACKET_HEADER)
+      {
+        feedCenterRx(camCenterRx, b);
+        continue;
+      }
+
       // 其他 byte：丟棄
     }
 
@@ -241,6 +312,7 @@ void setup()
   Serial2.begin(115200, SERIAL_8N1, CAMERA_RX_PIN, CAMERA_TX_PIN);
 
   Serial.println("Control Board Ready");
+  loadServoCenters();
 
   initCPG();
   // Servo Task

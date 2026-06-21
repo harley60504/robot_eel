@@ -5,6 +5,7 @@
 #include "config.h"           // ✅ 一定要有 bodyNum
 #include "ControltoCamera.h"
 #include "AnglePacket.h"
+#include "CenterPacket.h"
 
 // ==== Servo 回報封包定義（需跟控制板一致）====
 #define SERVO_STATUS_HEADER 0xBB
@@ -34,6 +35,8 @@ namespace CtrlUartBridge {
 
   // ✅ UART TX：AnglePacket（Flutter 控制 servo 用）
   void sendAngle(const float* targetDeg, uint8_t count);
+
+  void sendServoCenter(const float* centerDeg, uint8_t count, bool save);
 
   // callbacks（UART RX → 上層）
   extern std::function<void(const ControlPacket&)> onCtrlParams;

@@ -2,9 +2,7 @@
 #include <WebServer.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
-#include <SPIFFS.h>
 #include "wifi_manager.h"
-#include "servo_csv_log.h"
 
 extern WebServer server;
 
@@ -110,23 +108,5 @@ inline void setupWifiHttpApi()
 
     deleteWifi(server.arg("ssid"));
     server.send(200, "text/plain", "OK");
-  });
-
-  // ---------- download camera-side servo CSV ----------
-  server.on("/download", []() {
-    if (!SPIFFS.exists(SERVO_CSV_PATH)) {
-      server.send(404, "text/plain", "data.csv not found");
-      return;
-    }
-
-    File f = SPIFFS.open(SERVO_CSV_PATH, "r");
-    if (!f) {
-      server.send(500, "text/plain", "failed to open data.csv");
-      return;
-    }
-
-    server.sendHeader("Content-Disposition", "attachment; filename=data.csv");
-    server.streamFile(f, "text/csv");
-    f.close();
   });
 }

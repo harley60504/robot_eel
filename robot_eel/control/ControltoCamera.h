@@ -21,6 +21,7 @@ typedef struct {
   float    ampScales[bodyNum];
   float    phaseLags[bodyNum - 1];
   float    jointBiasDeg[bodyNum];
+  float    servoDefaultAngles[bodyNum];
   bool     isPaused;
   uint8_t  controlMode;
   uint8_t  checksum;      // XOR checksum
@@ -49,7 +50,8 @@ static inline void sendControlParamsUART(
   const float* phaseLags,
   const float* jointBiasDeg,
   bool   isPaused,
-  uint8_t controlMode
+  uint8_t controlMode,
+  const float* servoDefaultAngles = nullptr
 ) {
   ControlPacket pkt;
 
@@ -61,6 +63,7 @@ static inline void sendControlParamsUART(
   for (int i = 0; i < bodyNum; i++) {
     pkt.ampScales[i] = ampScales[i];
     pkt.jointBiasDeg[i] = jointBiasDeg[i];
+    pkt.servoDefaultAngles[i] = servoDefaultAngles ? servoDefaultAngles[i] : 120.0f;
   }
   for (int i = 0; i < bodyNum - 1; i++) {
     pkt.phaseLags[i] = phaseLags[i];

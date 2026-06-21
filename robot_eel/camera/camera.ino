@@ -8,7 +8,6 @@
 #include "wifi_http.h"
 #include "CtrlUartBridge.h"
 #include "CtrlWsServer.h"
-#include "servo_csv_log.h"
 #include "wifi_manager.h"
 
 // WebSocket ports:
@@ -26,7 +25,6 @@ void setup()
 
     // Wi-Fi AP/STA and HTTP API.
     startWifiApSta();
-    initServoCsvLog();
     setupWifiHttpApi();
 
     // Keep control/WebSocket alive even if the camera module fails to init.

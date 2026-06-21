@@ -120,7 +120,8 @@ void CtrlUartBridge::sendCtrlParams(const ControlPacket &pkt)
     pkt.phaseLags,
     pkt.jointBiasDeg,
     pkt.isPaused,
-    pkt.controlMode
+    pkt.controlMode,
+    pkt.servoDefaultAngles
   );
 }
 
@@ -140,6 +141,24 @@ void CtrlUartBridge::sendAngle(const float* targetDeg, uint8_t count)
     *g_ser,
     targetDeg,
     count,
+    seq++
+  );
+}
+
+void CtrlUartBridge::sendServoCenter(const float* centerDeg, uint8_t count, bool save)
+{
+  if (!g_ser) return;
+
+  if (count == 0) return;
+  if (count > bodyNum) count = bodyNum;
+
+  static uint32_t seq = 0;
+
+  sendCenterPacketUART(
+    *g_ser,
+    centerDeg,
+    count,
+    save,
     seq++
   );
 }

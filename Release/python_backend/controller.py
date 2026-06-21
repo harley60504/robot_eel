@@ -6,7 +6,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from websocket import create_connection
+from websocket import WebSocketTimeoutException, create_connection
 from fastapi import FastAPI, Response
 from pydantic import BaseModel
 
@@ -30,7 +30,8 @@ except ImportError:
 # =========================
 seq_counter = 0
 measure_enabled = False
-csv_lines = ["seq,rtt_ms"]
+csv_lines = ["seq,rtt_ms,status"]
+BASE_DIR = Path(__file__).resolve().parent
 recording_stop_event = threading.Event()
 recording_thread = None
 recording_lock = threading.Lock()
@@ -46,8 +47,11 @@ preview_record_writer = None
 preview_record_codec = None
 
 def save_csv():
-    with open("latency.csv", "w", encoding="utf-8") as f:
+    path = BASE_DIR / "latency.csv"
+    with path.open("w", encoding="utf-8") as f:
         f.write("\n".join(csv_lines))
+    print("[RTT] saved:", path.resolve())
+    return str(path.resolve())
 
 # =========================
 # State
@@ -301,10 +305,14 @@ def send_angle_rtt(ws, angles):
 
     t1 = time.perf_counter_ns()
     ws.send(json.dumps(payload))
+    deadline = time.time() + 1.0
 
-    while True:
-        msg = ws.recv()
-        t2 = time.perf_counter_ns()
+    while time.time() < deadline:
+        try:
+            msg = ws.recv()
+            t2 = time.perf_counter_ns()
+        except WebSocketTimeoutException:
+            continue
 
         try:
             data = json.loads(msg)
@@ -313,9 +321,12 @@ def send_angle_rtt(ws, angles):
 
         if data.get("type") == "angle_ack" and data.get("seq") == seq:
             rtt = (t2 - t1) / 1e6
-            csv_lines.append(f"{seq},{rtt:.2f}")
+            csv_lines.append(f"{seq},{rtt:.2f},ok")
             print(f"[RTT] {rtt:.2f} ms")
             return
+
+    csv_lines.append(f"{seq},,timeout")
+    print(f"[RTT] timeout seq={seq}")
 
 def send_params(ws, params):
     payload = {
@@ -576,6 +587,7 @@ def control_loop():
 
     try:
         ws = create_connection(ws_url(), timeout=3)
+        ws.settimeout(0.25)
     except Exception as e:
         print("[PY] connect fail:", e)
         return
@@ -608,7 +620,10 @@ def control_loop():
                 break
             interval = state.interval_ms
             output_mode = state.output_mode.lower()
-            desired_mode = state.cpg_mode_id if output_mode == "cpg" else state.angle_mode_id
+            measuring = measure_enabled
+            desired_mode = state.angle_mode_id if measuring else (
+                state.cpg_mode_id if output_mode == "cpg" else state.angle_mode_id
+            )
 
         if desired_mode != active_mode:
             send_mode(ws, desired_mode)
@@ -624,16 +639,16 @@ def control_loop():
             dt = interval / 1000.0
 
         try:
-            if output_mode == "cpg":
+            if measuring:
+                angles = generate_angles(t, dt)
+                send_angle_rtt(ws, angles)
+            elif output_mode == "cpg":
                 params = generate_cpg_params(t, dt)
                 params["mode"] = active_mode
                 send_params(ws, params)
             else:
                 angles = generate_angles(t, dt)
-                if measure_enabled:
-                    send_angle_rtt(ws, angles)
-                else:
-                    send_angle(ws, angles)
+                send_angle(ws, angles)
         except Exception as e:
             print("[PY] generate/send fail:", e)
             break
@@ -888,15 +903,22 @@ def stop():
 
 @app.post("/measure_on")
 def measure_on():
-    global measure_enabled
+    global measure_enabled, csv_lines
     measure_enabled = True
-    return {"ok": True}
+    csv_lines = ["seq,rtt_ms,status"]
+    return {"ok": True, "measure_enabled": True}
 
 @app.post("/measure_off")
 def measure_off():
     global measure_enabled
     measure_enabled = False
-    return {"ok": True}
+    path = save_csv()
+    return {
+        "ok": True,
+        "measure_enabled": False,
+        "csv_path": path,
+        "samples": max(0, len(csv_lines) - 1),
+    }
 
 @app.post("/recording/start")
 def recording_start():
