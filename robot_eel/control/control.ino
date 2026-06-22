@@ -296,7 +296,7 @@ void setup()
 {
   Serial.begin(115200);
   delay(300);
-  statusMutex = xTaskCreateMutex();
+  statusMutex = xSemaphoreCreateMutex();
   // ✅ 建立 angleMutex（很重要）
   angleMutex = xSemaphoreCreateMutex();
 
