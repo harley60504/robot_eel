@@ -30,7 +30,7 @@ static Preferences servoCenterPrefs;
 //  Control Parameters
 // ==========================
 // RL exported params: mujoco_simulation/gaits/rl_straight.json
-float Ajoint       = 15.0f;  // deg
+float Ajoint       = 20.0f;  // deg
 float frequency    = 1.0f;
 float lambda       = 1.6275f;
 float L            = 1.0f;
@@ -296,7 +296,7 @@ void setup()
 {
   Serial.begin(115200);
   delay(300);
-  statusMutex = xSemaphoreCreateMutex();
+  statusMutex = xTaskCreateMutex();
   // ✅ 建立 angleMutex（很重要）
   angleMutex = xSemaphoreCreateMutex();
 
