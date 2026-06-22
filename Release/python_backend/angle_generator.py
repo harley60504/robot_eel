@@ -17,7 +17,7 @@ servoDefaultAngles = [120] * SERVO_COUNT
 # =============================
 ANGLE_MODE = "CPG"
 
-AJOINT_DEG = 15.0
+AJOINT_DEG = 20.0
 FREQUENCY_HZ = 1.0
 LAMBDA = 1.6275
 BODY_LENGTH = 1.0
