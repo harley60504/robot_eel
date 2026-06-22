@@ -127,7 +127,6 @@ def _json_gait_dirs():
     if env_dir:
         dirs.append(Path(env_dir).expanduser())
     dirs.append(Path(__file__).resolve().parent / "json")
-    dirs.append(_repo_root() / "mujoco_simulation" / "outputs" / "json" / "rl_gaits")
     return dirs
 
 
