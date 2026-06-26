@@ -1,0 +1,16 @@
+{
+  "name": "ew08_a20_targetv17_ppo_free_swim_freq_phase_run10",
+  "kind": "line",
+  "radius": null,
+  "rmse": 0.033876125079797995,
+  "arc_deg": 0.0,
+  "duration_s": 29.99900000001368,
+  "path_distance_m": 8.11679044272122,
+  "straight_distance_m": 5.197069690572635,
+  "mean_speed_m_s": 0.2705687003805966,
+  "forward_displacement_m": 5.195864324218367,
+  "mean_forward_speed_m_s": 0.17320125084889487,
+  "lateral_drift_m": 0.11192539025418141,
+  "actual_yaw_rate_rad_s": 0.005633388332294137,
+  "fit_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fitted_curve_comparison_mean\\sim_ew08_a20_targetv17_ppo_free_swim_freq_phase_run10_fitted_rotated.png"
+}

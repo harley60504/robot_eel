@@ -1,0 +1,29 @@
+{
+  "corner_points_px": {
+    "top_left": [
+      28,
+      35
+    ],
+    "top_right": [
+      824,
+      29
+    ],
+    "bottom_right": [
+      814,
+      444
+    ],
+    "bottom_left": [
+      18,
+      439
+    ]
+  },
+  "length_top_px": 796.0226127441356,
+  "length_bottom_px": 796.0157033626912,
+  "width_left_px": 404.1237434252039,
+  "width_right_px": 415.12046444375636,
+  "px_per_m_from_length_avg": 265.3397193511378,
+  "px_per_m_from_width_avg": 273.0814026229868,
+  "recommended_px_per_m_average": 269.2105609870623,
+  "meters_per_px_average": 0.0037145645264936612,
+  "note": "Approximate manual inner-tank calibration from lit color frame. Long side=3.0 m, short side=1.5 m."
+}

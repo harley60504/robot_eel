@@ -13,6 +13,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+ROOT = Path(__file__).resolve().parent
+
 GROUP_ORDER = {
     ("yaw", "left"): 0,
     ("yaw", "right"): 1,
@@ -20,8 +22,13 @@ GROUP_ORDER = {
     ("radius", "right"): 3,
 }
 
+DEFAULT_SUMMARY_DIR = ROOT / "outputs" / "paper_ppo_40_extracted_figures" / "average_reward_summary"
+
 REWARD_NAME_RE = re.compile(
     r"ppo_turn_(?P<direction>left|right)_a\d+_(?P<mode_code>[yr])(?P<target_code>\d+)_run\d+_eval_reward\.csv$"
+)
+GROUP_CSV_RE = re.compile(
+    r"paper_reward_(?P<mode>yaw|radius)_(?P<direction>left|right)_(?P<target>\d+p\d+)\.csv$"
 )
 
 
@@ -66,6 +73,31 @@ def rows_from_reward_dir(path: Path, target: float | None) -> list[dict]:
             }
         )
     return rows
+
+
+def read_group_csv(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int]:
+    rows = list(csv.DictReader(Path(path).open(encoding="utf-8")))
+    if not rows:
+        raise ValueError(f"empty reward summary csv: {path}")
+    run_columns = [name for name in rows[0] if name.startswith("run")]
+    steps = np.asarray([float(row["timesteps"]) for row in rows], dtype=np.float64)
+    mean = np.asarray([float(row["mean_reward"]) for row in rows], dtype=np.float64)
+    low = np.asarray([float(row["ci95_low"]) for row in rows], dtype=np.float64)
+    high = np.asarray([float(row["ci95_high"]) for row in rows], dtype=np.float64)
+    return steps, mean, low, high, len(run_columns)
+
+
+def group_csvs_from_summary_dir(path: Path, target: float | None) -> list[tuple[str, str, str, Path]]:
+    group_csvs = []
+    for csv_path in sorted(Path(path).glob("paper_reward_*.csv")):
+        match = GROUP_CSV_RE.match(csv_path.name)
+        if match is None:
+            continue
+        target_value = float(match.group("target").replace("p", "."))
+        if target is not None and abs(target_value - target) > 1e-9:
+            continue
+        group_csvs.append((match.group("mode"), match.group("direction"), f"{target_value:.1f}", csv_path))
+    return group_csvs
 
 
 def common_series(paths: list[Path]) -> tuple[np.ndarray, np.ndarray]:
@@ -151,12 +183,99 @@ def plot_groups(groups: dict[tuple[str, str, str], list[Path]], out_dir: Path, n
     return png_path
 
 
+def plot_group_csvs(group_csvs: list[tuple[str, str, str, Path]], out_dir: Path) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(group_csvs, key=lambda item: (GROUP_ORDER.get((item[0], item[1]), 99), item[2]))
+    if not ordered:
+        raise ValueError(f"no paper_reward_*.csv files found in {out_dir}")
+
+    ncols = 2
+    nrows = max(1, int(np.ceil(len(ordered) / ncols)))
+    fig_height = 7.5 if nrows == 2 else 3.7 * nrows
+    fig, axes = plt.subplots(nrows, ncols, figsize=(10.4, fig_height), dpi=220, sharex=True, sharey=True)
+    axes_flat = np.asarray(axes).ravel()
+    summary_rows = []
+
+    for ax, (mode, direction, target, csv_path) in zip(axes_flat, ordered):
+        steps, mean, low, high, run_count = read_group_csv(csv_path)
+        label = group_label(mode, direction, target)
+        color = plt.rcParams["axes.prop_cycle"].by_key()["color"][len(summary_rows) % 10]
+        ax.fill_between(steps, low, high, color=color, alpha=0.22, linewidth=0)
+        ax.plot(steps, mean, color=color, linewidth=2.3, label=f"{label}, n={run_count}")
+        ax.set_title("Eval mean reward over training steps", fontsize=10)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Eval mean reward")
+        ax.grid(True, alpha=0.28)
+        ax.legend(loc="lower right", fontsize=8, framealpha=0.92)
+        ax.ticklabel_format(style="sci", axis="x", scilimits=(6, 6))
+        summary_rows.append((mode, direction, target, run_count, csv_path))
+
+    for ax in axes_flat[len(ordered) :]:
+        ax.axis("off")
+
+    fig.tight_layout()
+    png_path = out_dir / "paper_reward_mean_ci95.png"
+    fig.savefig(png_path)
+    plt.close(fig)
+
+    with (out_dir / "paper_reward_summary.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["mode", "direction", "target", "run_count", "group_csv"])
+        writer.writerows(summary_rows)
+    return png_path
+
+
+def plot_group_csv_images(group_csvs: list[tuple[str, str, str, Path]], out_dir: Path) -> list[Path]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(group_csvs, key=lambda item: (GROUP_ORDER.get((item[0], item[1]), 99), item[2]))
+    if not ordered:
+        raise ValueError(f"no paper_reward_*.csv files found in {out_dir}")
+
+    png_paths = []
+    summary_rows = []
+    for idx, (mode, direction, target, csv_path) in enumerate(ordered):
+        steps, mean, low, high, run_count = read_group_csv(csv_path)
+        label = group_label(mode, direction, target)
+        color = plt.rcParams["axes.prop_cycle"].by_key()["color"][idx % 10]
+
+        fig, ax = plt.subplots(figsize=(5.2, 3.75), dpi=220)
+        ax.fill_between(steps, low, high, color=color, alpha=0.22, linewidth=0)
+        ax.plot(steps, mean, color=color, linewidth=2.3, label=f"{label}, n={run_count}")
+        ax.set_title("Eval mean reward over training steps", fontsize=10)
+        ax.set_xlabel("Step")
+        ax.set_ylabel("Eval mean reward")
+        ax.grid(True, alpha=0.28)
+        ax.legend(loc="lower right", fontsize=8, framealpha=0.92)
+        ax.ticklabel_format(style="sci", axis="x", scilimits=(6, 6))
+        fig.tight_layout()
+
+        png_path = out_dir / f"paper_reward_{mode}_{direction}_{str(target).replace('.', 'p')}.png"
+        fig.savefig(png_path)
+        plt.close(fig)
+
+        png_paths.append(png_path)
+        summary_rows.append((mode, direction, target, run_count, csv_path, png_path))
+
+    with (out_dir / "paper_reward_summary.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["mode", "direction", "target", "run_count", "group_csv", "png"])
+        writer.writerows(summary_rows)
+    return png_paths
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Create paper-style mean reward plots with translucent 95% CI bands.")
-    parser.add_argument("--summary-csv", type=Path, default=Path("outputs/batch_logs/turning_paper_40_summary.csv"))
+    parser.add_argument(
+        "--summary-dir",
+        type=Path,
+        default=DEFAULT_SUMMARY_DIR,
+        help="Directory containing paper_reward_*.csv summary files. Used by default without scanning elsewhere.",
+    )
+    parser.add_argument("--summary-csv", type=Path, default=None)
     parser.add_argument("--reward-dir", type=Path, default=None, help="Directory containing *_eval_reward.csv files.")
     parser.add_argument("--target", type=float, default=None, help="Optional target filter, for example 0.5.")
-    parser.add_argument("--out-dir", type=Path, default=Path("outputs/csv_png/paper_reward_summary"))
+    parser.add_argument("--out-dir", type=Path, default=None)
+    parser.add_argument("--combined", action="store_true", help="Write one combined 2x2 summary image instead of four PNGs.")
     parser.add_argument("--bootstrap", type=int, default=10_000)
     parser.add_argument("--seed", type=int, default=20260618)
     return parser.parse_args()
@@ -164,12 +283,22 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    out_dir = args.out_dir or args.summary_dir
+    if args.reward_dir is None and args.summary_csv is None:
+        group_csvs = group_csvs_from_summary_dir(args.summary_dir, args.target)
+        if args.combined:
+            print(plot_group_csvs(group_csvs, out_dir))
+        else:
+            for png_path in plot_group_csv_images(group_csvs, out_dir):
+                print(png_path)
+        return
+
     groups: dict[tuple[str, str, str], list[Path]] = defaultdict(list)
     source_rows = rows_from_reward_dir(args.reward_dir, args.target) if args.reward_dir is not None else rows_from_summary(args.summary_csv)
     for row in source_rows:
         key = (row["mode"], row["direction"], row["target"])
         groups[key].append(Path(row["eval_reward_csv"]))
-    png_path = plot_groups(groups, args.out_dir, args.bootstrap, args.seed)
+    png_path = plot_groups(groups, out_dir, args.bootstrap, args.seed)
     print(png_path)
 
 

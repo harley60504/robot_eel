@@ -1,0 +1,55 @@
+{
+  "status": "complete",
+  "total_runs": 40,
+  "summary_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\batch_logs\\free_swim_paper40_summary.csv",
+  "reward_summary_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\paper40_free_swim_reward_summary\\paper_reward_mean_ci95.png",
+  "organized_dir": "outputs\\paper_free_swim_40_targetv17_extracted_figures",
+  "organized_counts": [
+    {
+      "category": "average_reward_summary",
+      "files": 3,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\average_reward_summary"
+    },
+    {
+      "category": "batch_logs_and_status",
+      "files": 82,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\batch_logs_and_status"
+    },
+    {
+      "category": "gait_jsons",
+      "files": 40,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\gait_jsons"
+    },
+    {
+      "category": "individual_rewards",
+      "files": 120,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\individual_rewards"
+    },
+    {
+      "category": "fixed_gait_trajectories_after_mean",
+      "files": 120,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\fixed_gait_trajectories_after_mean"
+    },
+    {
+      "category": "training_eval_best_policy_curves",
+      "files": 120,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\training_eval_best_policy_curves"
+    },
+    {
+      "category": "policy_rerun_before_fixed_mean",
+      "files": 120,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\policy_rerun_before_fixed_mean"
+    },
+    {
+      "category": "fixed_gait_fitted_rotated_after_mean",
+      "files": 80,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\fixed_gait_fitted_rotated_after_mean"
+    },
+    {
+      "category": "swim_recording_metadata",
+      "files": 0,
+      "path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_40_targetv17_extracted_figures\\swim_recording_metadata"
+    }
+  ],
+  "finished_at": "2026-06-25 07:27:08"
+}

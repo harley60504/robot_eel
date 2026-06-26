@@ -6,3 +6,11 @@ __pycache__/
 Thumbs.db
 .vscode/
 .idea/
+Release/python_backend/.last_gait.json
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.wmv
+*.webm
+*.m4v

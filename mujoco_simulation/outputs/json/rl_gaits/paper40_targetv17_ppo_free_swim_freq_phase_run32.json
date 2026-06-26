@@ -1,0 +1,70 @@
+{
+  "name": "paper40_targetv17_ppo_free_swim_freq_phase_run32",
+  "ajoint": 14.999999999999998,
+  "freq": 1.1982533439993859,
+  "wavelength": 1.6275,
+  "amp_scales": [
+    1.225,
+    1.075,
+    1.0,
+    1.075,
+    1.15,
+    1.225
+  ],
+  "phase_lags": [
+    0.649599661976099,
+    0.6467819991707802,
+    0.6730536594986916,
+    0.6346179389953613,
+    0.650597783178091
+  ],
+  "joint_bias": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "source": {
+    "type": "free_swim_best_policy_rerun_mean_fixed_gait",
+    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\paper40_targetv17_ppo_free_swim_freq_phase_run32_eval\\best_model\\best_model.zip",
+    "strategy": "policy-rerun-mean",
+    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\paper40_targetv17_ppo_free_swim_freq_phase_run32_policy_rerun_trajectory.csv",
+    "steady_action_count": 400,
+    "steady_reward_mean": 0.9677656056383316,
+    "steady_reward_min": 0.9544000200763465,
+    "steady_reward_max": 0.9719517759568,
+    "env_config": {
+      "xml_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\eel.xml",
+      "episode_seconds": 10.0,
+      "warmup_seconds": 2.0,
+      "control_dt": 0.02,
+      "fixed_frequency": 1.0,
+      "fixed_wavelength": 1.6275,
+      "fixed_ajoint": 0.2617993877991494,
+      "fixed_amp_scales": [
+        1.225,
+        1.075,
+        1.0,
+        1.075,
+        1.15,
+        1.225
+      ],
+      "start_x": 0.6,
+      "start_y": 0.0,
+      "normalized_actions": true,
+      "frequency_low": 1.0,
+      "frequency_high": 1.2,
+      "phase_lag_low": 0.5,
+      "phase_lag_high": 0.8,
+      "reward_average_seconds": 1.0,
+      "target_speed": 0.17,
+      "speed_tolerance": 0.03,
+      "energy_weight": 0.02,
+      "boundary_x_min": -0.225,
+      "boundary_x_max": 3.225,
+      "boundary_y": 0.9
+    }
+  }
+}

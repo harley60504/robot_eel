@@ -1,0 +1,2 @@
+mode,direction,target,run_count,group_csv
+radius,straight,0.0,50,C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\csv_png\paper40_free_swim_reward_summary\paper_reward_radius_straight_0p0.csv

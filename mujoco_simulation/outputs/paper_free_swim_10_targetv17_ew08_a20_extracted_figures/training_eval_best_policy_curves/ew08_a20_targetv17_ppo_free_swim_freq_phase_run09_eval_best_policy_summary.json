@@ -1,0 +1,20 @@
+{
+  "name": "ew08_a20_targetv17_ppo_free_swim_freq_phase_run09",
+  "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\ew08_a20_targetv17_ppo_free_swim_freq_phase_run09_eval_best_policy_trajectory.csv",
+  "eval_best_policy_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\sim_ew08_a20_targetv17_ppo_free_swim_freq_phase_run09_eval_best_policy_fitted_rotated.png",
+  "eval_best_selection": "highest_mean_reward",
+  "eval_mean_reward": 257.16453923151863,
+  "eval_episode_reward": 257.16453923151863,
+  "kind": "line",
+  "radius": null,
+  "rmse": 0.03539830471852469,
+  "arc_deg": 0.0,
+  "duration_s": 9.979999999999897,
+  "path_distance_m": 2.8052030631263225,
+  "straight_distance_m": 1.7658496022875705,
+  "mean_speed_m_s": 0.2810824712551454,
+  "forward_displacement_m": 1.7642589017823551,
+  "mean_forward_speed_m_s": 0.1767794490763901,
+  "lateral_drift_m": 0.07493560823059281,
+  "actual_yaw_rate_rad_s": 0.020913371362145067
+}

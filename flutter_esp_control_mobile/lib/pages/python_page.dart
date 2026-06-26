@@ -26,21 +26,15 @@ class _PythonPageState extends State<PythonPage> {
   bool busy = false;
   bool loadingGaits = false;
   bool measuring = false;
-  String selectedGait = "straight_rl";
+  String selectedGait = "";
   String outputMode = "cpg";
-  List<Map<String, dynamic>> gaits = const [
-    {"key": "straight_rl", "label": "Straight RL"},
-    {"key": "left_turn_rl", "label": "Left Turn RL"},
-    {"key": "left_spin_rl", "label": "Left Strong RL"},
-    {"key": "right_turn_rl", "label": "Right Turn RL"},
-    {"key": "right_spin_rl", "label": "Right Strong RL"},
-  ];
+  List<Map<String, dynamic>> gaits = const [];
   String logText = "";
 
   @override
   void initState() {
     super.initState();
-    loadGaits();
+    initGaits();
   }
 
   void log(String s) {
@@ -48,18 +42,29 @@ class _PythonPageState extends State<PythonPage> {
     setState(() => logText = "$s\n$logText");
   }
 
+  Future<void> initGaits() async {
+    await loadGaits();
+  }
+
   Future<void> loadGaits() async {
     if (loadingGaits) return;
     setState(() => loadingGaits = true);
-    final loaded = await PythonApi.gaits(pcHost: ApiConfig.pythonHost);
+    final state = await PythonApi.gaitState(pcHost: ApiConfig.pythonHost);
     if (!mounted) return;
+    final loaded = state?.gaits ?? const <Map<String, dynamic>>[];
     setState(() {
       loadingGaits = false;
       if (loaded.isEmpty) return;
       gaits = loaded;
-      final selectedExists =
-          loaded.any((item) => item["key"]?.toString() == selectedGait);
-      if (!selectedExists) {
+      final current = state?.current ?? "";
+      final selectedExists = loaded.any(
+        (item) => item["key"]?.toString() == selectedGait,
+      );
+      if (current.isNotEmpty) {
+        selectedGait = current;
+      } else if (selectedExists) {
+        return;
+      } else {
         selectedGait = loaded.first["key"]?.toString() ?? selectedGait;
       }
     });
@@ -243,7 +248,17 @@ class _PythonPageState extends State<PythonPage> {
     );
     searchCtrl.dispose();
     if (!mounted || picked == null || picked.isEmpty) return;
-    setState(() => selectedGait = picked);
+    final ok = await PythonApi.setGait(
+      pcHost: ApiConfig.pythonHost,
+      gait: picked,
+    );
+    if (!mounted) return;
+    if (ok) {
+      setState(() => selectedGait = picked);
+      log("gait saved = $picked");
+    } else {
+      log("gait save failed = $picked");
+    }
   }
 
   Future<void> onStop() async {

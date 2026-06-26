@@ -2,6 +2,16 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 
+class GaitState {
+  final String current;
+  final List<Map<String, dynamic>> gaits;
+
+  const GaitState({
+    required this.current,
+    required this.gaits,
+  });
+}
+
 class PythonApi {
   static int get port => ApiConfig.pythonPort;
 
@@ -56,13 +66,15 @@ class PythonApi {
     required String espHost,
   }) async {
     try {
-      final res = await http.post(
-        _u(pcHost, "/set_esp_host"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "esp_host": espHost,
-        }),
-      ).timeout(const Duration(milliseconds: 900));
+      final res = await http
+          .post(
+            _u(pcHost, "/set_esp_host"),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({
+              "esp_host": espHost,
+            }),
+          )
+          .timeout(const Duration(milliseconds: 900));
       return res.statusCode == 200;
     } catch (_) {
       return false;
@@ -97,16 +109,26 @@ class PythonApi {
   static Future<List<Map<String, dynamic>>> gaits({
     required String pcHost,
   }) async {
+    final state = await gaitState(pcHost: pcHost);
+    return state?.gaits ?? const [];
+  }
+
+  static Future<GaitState?> gaitState({
+    required String pcHost,
+  }) async {
     try {
       final res = await http
           .get(_u(pcHost, "/gaits"))
           .timeout(const Duration(milliseconds: 900));
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) return null;
       final data = jsonDecode(res.body);
-      if (data is! Map || data["gaits"] is! List) return const [];
-      return List<Map<String, dynamic>>.from(data["gaits"]);
+      if (data is! Map || data["gaits"] is! List) return null;
+      return GaitState(
+        current: data["current"]?.toString() ?? "",
+        gaits: List<Map<String, dynamic>>.from(data["gaits"]),
+      );
     } catch (_) {
-      return const [];
+      return null;
     }
   }
 
@@ -115,12 +137,16 @@ class PythonApi {
     required String gait,
   }) async {
     try {
-      final res = await http.post(
-        _u(pcHost, "/set_gait"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"gait": gait}),
-      ).timeout(const Duration(milliseconds: 900));
-      return res.statusCode == 200;
+      final res = await http
+          .post(
+            _u(pcHost, "/set_gait"),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({"gait": gait}),
+          )
+          .timeout(const Duration(milliseconds: 900));
+      if (res.statusCode != 200) return false;
+      final data = jsonDecode(res.body);
+      return data is Map ? data["ok"] == true : true;
     } catch (_) {
       return false;
     }
@@ -131,11 +157,13 @@ class PythonApi {
     required String outputMode,
   }) async {
     try {
-      final res = await http.post(
-        _u(pcHost, "/set_output_mode"),
-        headers: {"Content-Type": "application/json"},
-        body: jsonEncode({"output_mode": outputMode}),
-      ).timeout(const Duration(milliseconds: 900));
+      final res = await http
+          .post(
+            _u(pcHost, "/set_output_mode"),
+            headers: {"Content-Type": "application/json"},
+            body: jsonEncode({"output_mode": outputMode}),
+          )
+          .timeout(const Duration(milliseconds: 900));
       return res.statusCode == 200;
     } catch (_) {
       return false;

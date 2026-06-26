@@ -13,14 +13,13 @@ MAX_DEG = 240
 servoDefaultAngles = [120] * SERVO_COUNT
 
 # =============================
-# MuJoCo / RL gait presets
+# MuJoCo / RL gait JSON
 # =============================
 ANGLE_MODE = "CPG"
-
-AJOINT_DEG = 20.0
-FREQUENCY_HZ = 1.0
-LAMBDA = 1.6275
 BODY_LENGTH = 1.0
+CPG_ALPHA = 4.0
+CPG_K_COUPLE = 0.35
+LAST_GAIT_FILE = Path(__file__).resolve().parent / ".last_gait.json"
 
 
 @dataclass(frozen=True)
@@ -38,81 +37,8 @@ class GaitPreset:
     joint_bias_deg: tuple[float, ...]
 
 
-RL_VXHARD_AMP_SCALES = (1.24, 1.08, 1.0, 1.05, 1.1, 1.2)
-RL_VXHARD_PHASE_LAGS = (0.614439, 0.614439, 0.614439, 0.614439, 0.614439)
-
-TURN_SOFT_BIAS_DEG = tuple(math.degrees(value) for value in (0.08, 0.10, 0.12, 0.14, 0.16, 0.18))
-TURN_STRONG_BIAS_DEG = tuple(math.degrees(value) for value in (0.12, 0.15, 0.18, 0.21, 0.24, 0.27))
-
-GAIT_PRESETS = {
-    "straight_rl": GaitPreset(
-        key="straight_rl",
-        label="Straight RL",
-        ajoint=AJOINT_DEG,
-        frequency=FREQUENCY_HZ,
-        lambda_=LAMBDA,
-        body_length=BODY_LENGTH,
-        alpha=4.0,
-        k_couple=0.35,
-        amp_scales=RL_VXHARD_AMP_SCALES,
-        phase_lags=RL_VXHARD_PHASE_LAGS,
-        joint_bias_deg=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-    ),
-    "left_turn_rl": GaitPreset(
-        key="left_turn_rl",
-        label="Left Turn RL",
-        ajoint=AJOINT_DEG,
-        frequency=FREQUENCY_HZ,
-        lambda_=LAMBDA,
-        body_length=BODY_LENGTH,
-        alpha=4.0,
-        k_couple=0.35,
-        amp_scales=RL_VXHARD_AMP_SCALES,
-        phase_lags=RL_VXHARD_PHASE_LAGS,
-        joint_bias_deg=TURN_SOFT_BIAS_DEG,
-    ),
-    "left_spin_rl": GaitPreset(
-        key="left_spin_rl",
-        label="Left Strong RL",
-        ajoint=AJOINT_DEG,
-        frequency=FREQUENCY_HZ,
-        lambda_=LAMBDA,
-        body_length=BODY_LENGTH,
-        alpha=4.0,
-        k_couple=0.35,
-        amp_scales=RL_VXHARD_AMP_SCALES,
-        phase_lags=RL_VXHARD_PHASE_LAGS,
-        joint_bias_deg=TURN_STRONG_BIAS_DEG,
-    ),
-    "right_turn_rl": GaitPreset(
-        key="right_turn_rl",
-        label="Right Turn RL",
-        ajoint=AJOINT_DEG,
-        frequency=FREQUENCY_HZ,
-        lambda_=LAMBDA,
-        body_length=BODY_LENGTH,
-        alpha=4.0,
-        k_couple=0.35,
-        amp_scales=RL_VXHARD_AMP_SCALES,
-        phase_lags=RL_VXHARD_PHASE_LAGS,
-        joint_bias_deg=tuple(-value for value in TURN_SOFT_BIAS_DEG),
-    ),
-    "right_spin_rl": GaitPreset(
-        key="right_spin_rl",
-        label="Right Strong RL",
-        ajoint=AJOINT_DEG,
-        frequency=FREQUENCY_HZ,
-        lambda_=LAMBDA,
-        body_length=BODY_LENGTH,
-        alpha=4.0,
-        k_couple=0.35,
-        amp_scales=RL_VXHARD_AMP_SCALES,
-        phase_lags=RL_VXHARD_PHASE_LAGS,
-        joint_bias_deg=tuple(-value for value in TURN_STRONG_BIAS_DEG),
-    ),
-}
-
-current_gait_key = "straight_rl"
+GAIT_PRESETS = {}
+current_gait_key = None
 cpg_r = [0.25] * SERVO_COUNT
 cpg_theta = [0.0] * SERVO_COUNT
 
@@ -136,21 +62,27 @@ def _as_tuple(values, count, field):
     return tuple(float(value) for value in values)
 
 
+def _required(mapping, field, source):
+    if not isinstance(mapping, dict) or field not in mapping:
+        raise ValueError(f"{source}.{field} is required")
+    return mapping[field]
+
+
 def _json_to_gait_preset(path):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     source = data.get("source") if isinstance(data.get("source"), dict) else {}
     env_config = source.get("env_config") if isinstance(source.get("env_config"), dict) else {}
 
-    name = str(data.get("name") or Path(path).stem)
-    ajoint = float(data.get("ajoint", AJOINT_DEG))
-    frequency = float(data.get("freq", env_config.get("fixed_frequency", FREQUENCY_HZ)))
-    lambda_ = float(data.get("wavelength", env_config.get("fixed_wavelength", LAMBDA)))
-    body_length = float(env_config.get("body_length", BODY_LENGTH))
-    alpha = float(env_config.get("alpha", 4.0))
-    k_couple = float(env_config.get("k_couple", 0.35))
-    amp_scales = _as_tuple(data.get("amp_scales"), SERVO_COUNT, "amp_scales")
-    phase_lags = _as_tuple(data.get("phase_lags"), SERVO_COUNT - 1, "phase_lags")
-    joint_bias_rad = _as_tuple(data.get("joint_bias"), SERVO_COUNT, "joint_bias")
+    name = str(_required(data, "name", "json"))
+    ajoint = float(_required(data, "ajoint", "json"))
+    frequency = float(_required(data, "freq", "json"))
+    lambda_ = float(_required(data, "wavelength", "json"))
+    body_length = float(env_config.get("body_length", data.get("body_length", BODY_LENGTH)))
+    alpha = float(env_config.get("alpha", data.get("alpha", CPG_ALPHA)))
+    k_couple = float(env_config.get("k_couple", data.get("k_couple", CPG_K_COUPLE)))
+    amp_scales = _as_tuple(_required(data, "amp_scales", "json"), SERVO_COUNT, "amp_scales")
+    phase_lags = _as_tuple(_required(data, "phase_lags", "json"), SERVO_COUNT - 1, "phase_lags")
+    joint_bias_rad = _as_tuple(_required(data, "joint_bias", "json"), SERVO_COUNT, "joint_bias")
 
     return GaitPreset(
         key=name,
@@ -173,9 +105,43 @@ def load_json_gait(path):
     return preset
 
 
+def _save_last_gait(key, source=None):
+    data = {"gait": key}
+    if source:
+        data["source"] = str(source)
+    LAST_GAIT_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def _restore_last_gait():
+    global current_gait_key
+    if not LAST_GAIT_FILE.exists():
+        return
+
+    try:
+        data = json.loads(LAST_GAIT_FILE.read_text(encoding="utf-8"))
+        key = str(data.get("gait") or "")
+        source = str(data.get("source") or "")
+
+        if key in GAIT_PRESETS:
+            current_gait_key = key
+            return
+
+        if source:
+            path = Path(source).expanduser()
+            if path.exists():
+                preset = load_json_gait(path)
+                current_gait_key = preset.key
+                return
+    except Exception as exc:
+        print(f"[angle_generator] skip last gait file {LAST_GAIT_FILE}: {exc}")
+
+
 def reload_json_gaits():
+    global current_gait_key
     loaded = []
     seen = set()
+    GAIT_PRESETS.clear()
+    current_gait_key = None
     for folder in _json_gait_dirs():
         if not folder.exists():
             continue
@@ -185,10 +151,13 @@ def reload_json_gaits():
                 if preset.key in seen:
                     continue
                 GAIT_PRESETS[preset.key] = preset
+                if current_gait_key is None:
+                    current_gait_key = preset.key
                 seen.add(preset.key)
                 loaded.append(preset.key)
             except Exception as exc:
                 print(f"[angle_generator] skip gait json {path}: {exc}")
+    _restore_last_gait()
     return loaded
 
 
@@ -196,14 +165,14 @@ reload_json_gaits()
 
 
 def _gait() -> GaitPreset:
+    if current_gait_key is None:
+        raise ValueError("No gait JSON loaded")
     return GAIT_PRESETS[current_gait_key]
 
 # =============================
 # SIN Params
 # =============================
 SIN_BASE = 0.0
-SIN_AMP = AJOINT_DEG
-SIN_FREQ = FREQUENCY_HZ
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
@@ -321,13 +290,16 @@ def list_gaits():
 
 def set_gait(key):
     global current_gait_key
+    source = None
     possible_path = Path(key).expanduser()
     if possible_path.exists():
+        source = possible_path.resolve()
         key = load_json_gait(possible_path).key
     if key not in GAIT_PRESETS:
         raise ValueError(f"Unknown gait preset: {key}")
     current_gait_key = key
     init_generator()
+    _save_last_gait(key, source)
 
 
 def current_gait():

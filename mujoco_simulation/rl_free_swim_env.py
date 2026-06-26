@@ -7,8 +7,8 @@ from typing import Any
 import mujoco
 import numpy as np
 
-from sim_config import EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y
-from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
+from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y
+from hopf_cpg import HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 try:
     import gymnasium as gym
@@ -18,30 +18,30 @@ except ImportError:
     spaces = None
 
 
+DEFAULT_FREE_SWIM_AJOINT_DEG = 20.0
+
+
 @dataclass
 class FreeSwimConfig:
     xml_path: str = EEL_MODEL_XML
-    episode_seconds: float = 8.0
+    episode_seconds: float = 10.0
     warmup_seconds: float = 2.0
     control_dt: float = 0.02
     fixed_frequency: float = 1.0
     fixed_wavelength: float = 1.6275
-    fixed_ajoint: float = degrees_to_radians(DEFAULT_AJOINT_DEG)
+    fixed_ajoint: float = degrees_to_radians(DEFAULT_FREE_SWIM_AJOINT_DEG)
+    fixed_amp_scales: tuple[float, ...] = (1.225, 1.075, 1.000, 1.075, 1.150, 1.225)
+    start_x: float = DEFAULT_START_X
+    start_y: float = DEFAULT_START_Y
     normalized_actions: bool = True
-    amp_scale_lows: tuple[float, ...] = (1.10, 0.95, 0.90, 0.95, 1.00, 1.05)
-    amp_scale_highs: tuple[float, ...] = (1.35, 1.20, 1.10, 1.20, 1.30, 1.40)
-    # PPO now learns one shared phase-lag residual for straight swimming instead of
-    # five independent phase lags.  The learned scalar is copied to all 5 links.
-    # This keeps the traveling wave coherent while still allowing small fine-tuning.
-    shared_phase_lag_low: float = 0.594439
-    shared_phase_lag_high: float = 0.634439
-    reward_average_seconds: float = 0.5
-    lateral_velocity_weight: float = 0.2
-    lateral_position_weight: float = 0.05
-    yaw_weight: float = 0.05
-    yaw_rate_weight: float = 0.02
-    energy_weight: float = 0.02
-    smoothness_weight: float = 0.02
+    frequency_low: float = 1.0
+    frequency_high: float = 1.2
+    phase_lag_low: float = 0.5
+    phase_lag_high: float = 0.8
+    reward_average_seconds: float = 1.0
+    target_speed: float = 0.17
+    speed_tolerance: float = 0.08
+    energy_weight: float = 0.08
     boundary_x_min: float = RESET_X_MIN
     boundary_x_max: float = RESET_X_MAX
     boundary_y: float = RESET_Y
@@ -51,13 +51,12 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
     """Free-swim PPO environment.
 
     Action layout:
-        0:6  amp_scales
-        6    shared phase_lag copied to all 5 inter-joint phase gaps
+        0    frequency
+        1:6  phase_lags for the 5 inter-joint phase gaps
 
-    The shared phase-lag action is intentionally low-dimensional.  Independent
-    per-link phase lags can easily destroy the coherent CPG traveling wave, so
-    straight swimming now treats phase as a single small residual around the
-    hand-tuned phase-lag value.
+    Joint bias is fixed at zero.  Amplitude is fixed through cfg.fixed_ajoint
+    and cfg.fixed_amp_scales.  The reward targets a desired forward velocity
+    and penalizes squared frequency as a simple energy proxy.
     """
 
     metadata = {"render_modes": []}
@@ -69,7 +68,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         self.cfg = config or FreeSwimConfig()
         self.model = mujoco.MjModel.from_xml_path(self.cfg.xml_path)
         self.data = mujoco.MjData(self.model)
-        self.model.opt.gravity[:] = (0, 0, 0)
+        self.model.opt.gravity[:] = (0, 0, -9.81)
 
         self.base_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
         self.tail_ctrl_slice = slice(0, 6)
@@ -85,7 +84,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         self.max_steps = max(1, int(round(self.cfg.episode_seconds / self.cfg.control_dt)))
         self.warmup_steps = max(0, int(round(self.cfg.warmup_seconds / self.cfg.control_dt)))
         self.step_count = 0
-        self.action_dim = 7
+        self.action_dim = 6
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
         self.cpg = HopfCPG(num_joints=6)
         self.velocity_window = deque(
@@ -107,6 +106,9 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
     def reset(self, *, seed: int | None = None, options: dict[str, Any] | None = None):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
+        base_xml_pos = self.model.body_pos[self.base_body_id]
+        self.data.qpos[0] = float(self.cfg.start_x) - float(base_xml_pos[0])
+        self.data.qpos[1] = float(self.cfg.start_y) - float(base_xml_pos[1])
         self.data.ctrl[:] = 0.0
         self.step_count = 0
         self.prev_action[:] = 0.0
@@ -119,18 +121,18 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         action = np.asarray(action, dtype=np.float64)
         action = np.clip(action, self.action_space.low, self.action_space.high)
         physical_action = self._physical_action(action)
-        amp_scales = tuple(float(value) for value in physical_action[:6])
-        shared_phase_lag = float(physical_action[6])
-        phase_lags = (shared_phase_lag,) * 5
+        frequency = float(physical_action[0])
+        phase_lags = tuple(float(value) for value in physical_action[1:6])
+        amp_scales = self.cfg.fixed_amp_scales
+        joint_bias = (0.0,) * 6
 
         params = HopfCPGParams(
-            frequency=self.cfg.fixed_frequency,
+            frequency=frequency,
             wavelength=self.cfg.fixed_wavelength,
             ajoint=self.cfg.fixed_ajoint,
             mu_scales=amp_scales_to_mu_scales(amp_scales),
             phase_lags=phase_lags,
-            fb_phase=0.0,
-            fb_amp=0.0,
+            joint_bias=joint_bias,
         )
 
         for _ in range(self.sim_steps_per_control):
@@ -148,28 +150,21 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         avg_velocity = np.mean(np.asarray(self.velocity_window, dtype=np.float64), axis=0)
         avg_vx, avg_vy = float(avg_velocity[0]), float(avg_velocity[1])
 
-        energy = float(np.mean(np.square(self.data.ctrl[self.tail_ctrl_slice])))
+        control_energy = float(np.mean(np.square(self.data.ctrl[self.tail_ctrl_slice])))
+        frequency_energy = frequency * frequency
         action_delta = float(np.linalg.norm(action - self.prev_action))
         self.prev_action = action.copy()
 
         steady_state = self.step_count > self.warmup_steps
-        reward_forward = avg_vx
-        reward_lateral_velocity = -self.cfg.lateral_velocity_weight * abs(avg_vy)
-        reward_lateral_position = -self.cfg.lateral_position_weight * abs(float(base_pos[1]))
-        reward_yaw = -self.cfg.yaw_weight * abs(yaw)
-        reward_yaw_rate = -self.cfg.yaw_rate_weight * abs(yaw_rate)
-        reward_energy = -self.cfg.energy_weight * energy
-        reward_smooth = -self.cfg.smoothness_weight * action_delta
+        speed_error = avg_vx - self.cfg.target_speed
+        speed_scale = max(float(self.cfg.speed_tolerance), 1e-6)
+        reward_forward = float(np.exp(-((speed_error / speed_scale) ** 2)))
+        reward_energy = -self.cfg.energy_weight * frequency_energy
         reward = 0.0
         if steady_state:
             reward = (
                 reward_forward
-                + reward_lateral_velocity
-                + reward_lateral_position
-                + reward_yaw
-                + reward_yaw_rate
                 + reward_energy
-                + reward_smooth
             )
 
         out_of_bounds = float(base_pos[0]) < self.cfg.boundary_x_min or float(base_pos[0]) > self.cfg.boundary_x_max or abs(float(base_pos[1])) > self.cfg.boundary_y
@@ -184,33 +179,36 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
             "yaw": yaw,
             "velocity_x": avg_vx,
             "velocity_y": avg_vy,
-            "energy_proxy": energy,
+            "energy_proxy": frequency_energy,
+            "control_energy_proxy": control_energy,
+            "frequency_energy_proxy": frequency_energy,
             "action_delta": action_delta,
             "steady_state": steady_state,
             "physical_action": physical_action.astype(np.float32),
+            "frequency": frequency,
             "amp_scales": np.asarray(amp_scales, dtype=np.float32),
-            "shared_phase_lag": shared_phase_lag,
             "phase_lags": np.asarray(phase_lags, dtype=np.float32),
+            "joint_bias": np.asarray(joint_bias, dtype=np.float32),
             "reward_forward": reward_forward,
-            "reward_lateral_velocity": reward_lateral_velocity,
-            "reward_lateral_position": reward_lateral_position,
-            "reward_yaw": reward_yaw,
-            "reward_yaw_rate": reward_yaw_rate,
             "reward_energy": reward_energy,
-            "reward_smooth": reward_smooth,
+            "target_speed": float(self.cfg.target_speed),
+            "speed_error": float(speed_error),
         }
         return self._obs(), float(reward), terminated, truncated, info
 
     def _action_bounds(self) -> tuple[np.ndarray, np.ndarray]:
-        amp_lows = np.asarray(self.cfg.amp_scale_lows, dtype=np.float64)
-        amp_highs = np.asarray(self.cfg.amp_scale_highs, dtype=np.float64)
-        if amp_lows.size != 6 or amp_highs.size != 6:
-            raise ValueError("amp bounds must have 6 values")
-        if self.cfg.shared_phase_lag_low > self.cfg.shared_phase_lag_high:
-            raise ValueError("shared_phase_lag_low cannot be greater than shared_phase_lag_high")
-        phase_lows = np.asarray([self.cfg.shared_phase_lag_low], dtype=np.float64)
-        phase_highs = np.asarray([self.cfg.shared_phase_lag_high], dtype=np.float64)
-        return np.concatenate((amp_lows, phase_lows)), np.concatenate((amp_highs, phase_highs))
+        if len(self.cfg.fixed_amp_scales) != 6:
+            raise ValueError("fixed_amp_scales must have 6 values")
+        if self.cfg.frequency_low > self.cfg.frequency_high:
+            raise ValueError("frequency_low cannot be greater than frequency_high")
+        if self.cfg.phase_lag_low > self.cfg.phase_lag_high:
+            raise ValueError("phase_lag_low cannot be greater than phase_lag_high")
+        phase_lows = np.full(5, float(self.cfg.phase_lag_low), dtype=np.float64)
+        phase_highs = np.full(5, float(self.cfg.phase_lag_high), dtype=np.float64)
+        return (
+            np.concatenate(([float(self.cfg.frequency_low)], phase_lows)),
+            np.concatenate(([float(self.cfg.frequency_high)], phase_highs)),
+        )
 
     def _physical_action(self, action: np.ndarray) -> np.ndarray:
         if not self.cfg.normalized_actions:

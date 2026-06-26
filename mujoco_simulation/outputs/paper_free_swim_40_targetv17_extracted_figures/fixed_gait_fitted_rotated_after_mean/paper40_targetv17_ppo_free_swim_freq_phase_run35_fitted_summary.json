@@ -1,0 +1,16 @@
+{
+  "name": "paper40_targetv17_ppo_free_swim_freq_phase_run35",
+  "kind": "line",
+  "radius": null,
+  "rmse": 0.0253826109477897,
+  "arc_deg": 0.0,
+  "duration_s": 29.99900000001368,
+  "path_distance_m": 7.330896326673518,
+  "straight_distance_m": 4.767052081862338,
+  "mean_speed_m_s": 0.24437135660089251,
+  "forward_displacement_m": 4.7667674943812886,
+  "mean_forward_speed_m_s": 0.15889754639751708,
+  "lateral_drift_m": 0.05208844111681071,
+  "actual_yaw_rate_rad_s": -0.005850270394059794,
+  "fit_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fitted_curve_comparison_mean\\sim_paper40_targetv17_ppo_free_swim_freq_phase_run35_fitted_rotated.png"
+}

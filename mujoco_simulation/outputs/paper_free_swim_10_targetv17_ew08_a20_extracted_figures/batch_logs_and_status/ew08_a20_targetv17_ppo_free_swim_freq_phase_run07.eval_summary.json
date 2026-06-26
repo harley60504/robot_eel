@@ -1,0 +1,15 @@
+{
+  "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\ew08_a20_targetv17_ppo_free_swim_freq_phase_run07_eval\\best_model\\best_model.zip",
+  "mean_episode_reward": 330.51708339281095,
+  "mean_vx": 0.17917933466774297,
+  "mean_vy": -0.002641579276690723,
+  "mean_abs_y": 0.03356987937389672,
+  "mean_abs_yaw": 0.3278508926922201,
+  "mean_energy_proxy": 1.0,
+  "mean_frequency": 1.0,
+  "mean_phase_lag_1": 0.7955309207141399,
+  "mean_phase_lag_2": 0.7174941593706607,
+  "mean_phase_lag_3": 0.6562927786409855,
+  "mean_phase_lag_4": 0.5001311725974082,
+  "mean_phase_lag_5": 0.6966864301860333
+}
