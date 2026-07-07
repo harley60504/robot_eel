@@ -109,7 +109,7 @@ class _MainLayoutState extends State<MainLayout> {
     }
 
     Future.delayed(const Duration(seconds: 1), () {
-      WsControlApi.ensureConnect();
+      WsControlApi.ensureAllConnect();
     });
   }
 

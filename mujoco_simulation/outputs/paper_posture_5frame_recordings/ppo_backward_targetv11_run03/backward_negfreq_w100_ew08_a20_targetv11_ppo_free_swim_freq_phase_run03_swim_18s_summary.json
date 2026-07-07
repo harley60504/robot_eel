@@ -1,0 +1,29 @@
+{
+  "name": "backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03",
+  "gait_json": "outputs\\json\\rl_gaits\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03.json",
+  "video_mp4": "outputs\\paper_posture_5frame_recordings\\ppo_backward_targetv11_run03\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03_swim_18s.mp4",
+  "snapshots_dir": "outputs\\paper_posture_5frame_recordings\\ppo_backward_targetv11_run03\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03_snapshots",
+  "snapshot_count": 9,
+  "trajectory_csv": "outputs\\paper_posture_5frame_recordings\\ppo_backward_targetv11_run03\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03_swim_18s_trajectory.csv",
+  "seconds": 18.0,
+  "fps": 30.0,
+  "width": 1280,
+  "height": 720,
+  "wall_collision": false,
+  "hidden_visual_prefixes": [
+    "wall_",
+    "course_",
+    "corner_marker",
+    "start_marker"
+  ],
+  "floor_half_extents_m": [
+    4.0,
+    3.0
+  ],
+  "camera_mode": "fixed",
+  "camera_lookat": [
+    0.6,
+    0.0,
+    -0.02
+  ]
+}

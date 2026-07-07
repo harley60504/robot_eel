@@ -7,10 +7,10 @@
 #include "utils.h"
 #include "cpg.h"
 #include "servo.h"
-#include "ServoStatusUART.h"
-#include "ControltoCamera.h"
-#include "AnglePacket.h"
-#include "CenterPacket.h"
+#include "ServoStatusPacket.h"
+#include "ControlParamsPacket.h"
+#include "ServoTargetPacket.h"
+#include "ServoCenterPacket.h"
 
 
 
@@ -59,18 +59,18 @@ HopfOscillator cpg[bodyNum];
 unsigned long g_lastLogTime = 0;
 
 // ==========================
-// RX state (ControlPacket)
+// RX state (ControlParamsPacket)
 // ==========================
-static ControlRxState camCtrlRx;
+static ControlParamsRxState camCtrlRx;
 
 // ==========================
-// RX state (AnglePacket)
+// RX state (ServoTargetPacket)
 // ==========================
-static AngleRxState camAngleRx;
-static CenterRxState camCenterRx;
+static ServoTargetRxState camTargetRx;
+static ServoCenterRxState camCenterRx;
 
 // ==========================
-// UART Angle cache (shared with servoTask)
+// UART servo-target cache (shared with servoTask)
 // ==========================
 volatile bool g_haveAngleCmd = false;
 float g_uartTargetDeg[bodyNum] = {0};
@@ -110,7 +110,7 @@ void saveServoCenters()
   Serial.println("[CENTER] saved to NVS");
 }
 
-void applyServoCenters(const CenterPacket &pkt)
+void applyServoCenters(const ServoCenterPacket &pkt)
 {
   if (pkt.count != bodyNum) return;
 
@@ -169,13 +169,13 @@ void cameraRxTask(void* pv)
       uint8_t b = Serial2.read();
 
       // =====================================================
-      // 優先處理：如果 Angle parser 正在接收，就只餵 Angle
+      // 優先處理：如果 ServoTarget parser 正在接收，就只餵 Angle
       // =====================================================
-      if (camAngleRx.receiving)
+      if (camTargetRx.receiving)
       {
-        if (feedAngleRx(camAngleRx, b))
+        if (feedServoTargetRx(camTargetRx, b))
         {
-          AnglePacket &pkt = camAngleRx.pkt;
+          ServoTargetPacket &pkt = camTargetRx.pkt;
 
           if (pkt.count == bodyNum)
           {
@@ -198,11 +198,11 @@ void cameraRxTask(void* pv)
           }
 
           // Debug（可關）
-          Serial.printf("[UART] AnglePacket OK seq=%lu count=%u\n",
+          Serial.printf("[UART] ServoTargetPacket OK seq=%lu count=%u\n",
                         (unsigned long)pkt.seq, (unsigned)pkt.count);
         }
 
-        // ✅ 已在 Angle 狀態下，這個 byte 不要再給其他 parser
+        // ✅ 已在 ServoTarget 狀態下，這個 byte 不要再給其他 parser
         continue;
       }
 
@@ -211,7 +211,7 @@ void cameraRxTask(void* pv)
       // =====================================================
       if (camCenterRx.receiving)
       {
-        if (feedCenterRx(camCenterRx, b))
+        if (feedServoCenterRx(camCenterRx, b))
         {
           applyServoCenters(camCenterRx.pkt);
         }
@@ -221,9 +221,9 @@ void cameraRxTask(void* pv)
 
       if (camCtrlRx.receiving)
       {
-        if (feedControlRx(camCtrlRx, b))
+        if (feedControlParamsRx(camCtrlRx, b))
         {
-          ControlPacket &pkt = camCtrlRx.pkt;
+          ControlParamsPacket &pkt = camCtrlRx.pkt;
           int previousMode = controlMode;
 
           Ajoint       = pkt.Ajoint;
@@ -240,7 +240,7 @@ void cameraRxTask(void* pv)
           isPaused     = pkt.isPaused;
           controlMode  = pkt.controlMode;
 
-          // ✅ 如果切到非 Angle 模式，把角度命令標記清掉（避免殘留）
+          // ✅ 如果切到非 ServoTarget 模式，把角度命令標記清掉（避免殘留）
           if (controlMode != MODE_UART_ANGLE) {
             g_haveAngleCmd = false;
           }
@@ -249,7 +249,7 @@ void cameraRxTask(void* pv)
             initCPG();
           }
 
-          Serial.println("==== UART ← Camera (ControlPacket) ====");
+          Serial.println("==== UART ← Camera (ControlParamsPacket) ====");
           Serial.printf("mode=%d pause=%d A=%.2f f=%.2f lambda=%.2f L=%.2f\n",
                         controlMode, (int)isPaused,
                         Ajoint, frequency, lambda, L);
@@ -262,23 +262,23 @@ void cameraRxTask(void* pv)
       // =====================================================
       // Idle 狀態：只認 header，才開始接收
       // =====================================================
-      if (b == CONTROL_PACKET_HEADER)
+      if (b == CONTROL_PARAMS_PACKET_HEADER)
       {
         // 啟動 Control parser（把 header 也放進去）
-        feedControlRx(camCtrlRx, b);
+        feedControlParamsRx(camCtrlRx, b);
         continue;
       }
 
-      if (b == ANGLE_PACKET_HEADER)
+      if (b == SERVO_TARGET_PACKET_HEADER)
       {
-        // 啟動 Angle parser（把 header 也放進去）
-        feedAngleRx(camAngleRx, b);
+        // 啟動 ServoTarget parser（把 header 也放進去）
+        feedServoTargetRx(camTargetRx, b);
         continue;
       }
 
-      if (b == CENTER_PACKET_HEADER)
+      if (b == SERVO_CENTER_PACKET_HEADER)
       {
-        feedCenterRx(camCenterRx, b);
+        feedServoCenterRx(camCenterRx, b);
         continue;
       }
 

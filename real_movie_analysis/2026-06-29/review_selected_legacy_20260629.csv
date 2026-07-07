@@ -1,0 +1,7 @@
+﻿video,task,metric,target,original_global,per_lap_steady,target_error_percent,center_drift_m,full_laps,provenance
+right_y07_2,right Y07,yaw_rate_rad_s,0.7,0.5828103356,0.5965049342,-14.785009400000003,0.1679231959,4,same file as right_r03_3; original gait JSON unknown
+left_r05_2,left R05,radius_m,0.5,0.3851099519,0.3582136279,-28.35727442,0.0551504055,2,original gait JSON unknown
+left_y05_2,left Y05,yaw_rate_rad_s,0.5,0.4114610594,0.3992583256,-20.148334879999997,0.1150421306,3,original gait JSON unknown
+right_r03_2,right R03,radius_m,0.3,0.244031108,0.1989066086,-33.69779713333333,0.2877285988,5,original gait JSON unknown
+left_y07_run07,left Y07 run07,yaw_rate_rad_s,0.7,0.6117558162,0.6003043287,-14.242238757142855,0.0044617384,2,paper80_ppo_turn_left_a20_y07_run07; sim fitted yaw=0.6826816348
+left_r05_run05,left R05 run05,radius_m,0.5,0.5065148115,0.5094546573,1.8909314599999894,,1,paper_ppo_turn_left_a20_r05_run05; sim radius=0.4052543598

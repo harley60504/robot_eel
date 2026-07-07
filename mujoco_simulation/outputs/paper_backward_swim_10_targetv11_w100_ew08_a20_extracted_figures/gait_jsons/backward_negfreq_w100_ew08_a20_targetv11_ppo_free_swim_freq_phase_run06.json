@@ -1,0 +1,70 @@
+{
+  "name": "backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run06",
+  "ajoint": 20.0,
+  "freq": -1.0002202236652373,
+  "wavelength": 1.6275,
+  "amp_scales": [
+    1.225,
+    1.075,
+    1.0,
+    1.075,
+    1.15,
+    1.225
+  ],
+  "phase_lags": [
+    0.5614511413872242,
+    0.5165332731604576,
+    0.6242976522445679,
+    0.6605201087892055,
+    0.5917679713666439
+  ],
+  "joint_bias": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "source": {
+    "type": "free_swim_best_policy_rerun_mean_fixed_gait",
+    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run06_eval\\best_model\\best_model.zip",
+    "strategy": "policy-rerun-mean",
+    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run06_policy_rerun_trajectory.csv",
+    "steady_action_count": 400,
+    "steady_reward_mean": -0.08724251910681356,
+    "steady_reward_min": -0.10413609357516439,
+    "steady_reward_max": -0.08676331533649463,
+    "env_config": {
+      "xml_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\eel.xml",
+      "episode_seconds": 10.0,
+      "warmup_seconds": 2.0,
+      "control_dt": 0.02,
+      "fixed_frequency": 1.0,
+      "fixed_wavelength": 1.6275,
+      "fixed_ajoint": 0.3490658503988659,
+      "fixed_amp_scales": [
+        1.225,
+        1.075,
+        1.0,
+        1.075,
+        1.15,
+        1.225
+      ],
+      "start_x": 2.4,
+      "start_y": 0.0,
+      "normalized_actions": true,
+      "frequency_low": -1.25,
+      "frequency_high": -1.0,
+      "phase_lag_low": 0.5,
+      "phase_lag_high": 0.8,
+      "reward_average_seconds": 1.0,
+      "target_speed": -0.11,
+      "speed_error_weight": 100.0,
+      "energy_weight": 0.08,
+      "boundary_x_min": -0.225,
+      "boundary_x_max": 3.225,
+      "boundary_y": 0.9
+    }
+  }
+}

@@ -4,17 +4,22 @@
 #include <Preferences.h>
 
 #include "camera_init.h"
-#include "cam_stream.h"
-#include "wifi_http.h"
+#include "CameraStreamWs.h"
+#include "HttpApi.h"
 #include "CtrlUartBridge.h"
-#include "CtrlWsServer.h"
+#include "ControlWsServer.h"
+#include "ServoStatusWs.h"
 #include "wifi_manager.h"
 
 // WebSocket ports:
 //   81 = camera stream
-//   82 = control
+//   82 = Flutter/manual control
+//   83 = Python backend control
+//   84 = servo status telemetry
 WebSocketsServer wsCam(81);
-WebSocketsServer wsCtrl(82);
+WebSocketsServer wsCtrlFlutter(82);
+WebSocketsServer wsCtrlPython(83);
+WebSocketsServer wsServoStatus(84);
 WebServer server(80);
 
 bool cameraReady = false;
@@ -25,7 +30,7 @@ void setup()
 
     // Wi-Fi AP/STA and HTTP API.
     startWifiApSta();
-    setupWifiHttpApi();
+    HttpApi::begin();
 
     // Keep control/WebSocket alive even if the camera module fails to init.
     cameraReady = initCamera();
@@ -39,11 +44,15 @@ void setup()
     );
 
     // WebSocket servers.
-    initStreamWS(wsCam);
-    CtrlWsServer::begin(wsCtrl);
+    CameraStreamWs::begin(wsCam);
+    ControlWsServer::begin(wsCtrlFlutter);
+    ControlWsServer::begin(wsCtrlPython);
+    ServoStatusWs::begin(wsServoStatus);
 
     wsCam.begin();
-    wsCtrl.begin();
+    wsCtrlFlutter.begin();
+    wsCtrlPython.begin();
+    wsServoStatus.begin();
     server.begin();
 
     Serial.println("System Ready.");
@@ -52,11 +61,13 @@ void setup()
 void loop()
 {
     wsCam.loop();
-    wsCtrl.loop();
+    wsCtrlFlutter.loop();
+    wsCtrlPython.loop();
+    wsServoStatus.loop();
     server.handleClient();
-    CtrlWsServer::tick();
+    ControlWsServer::tick();
 
     if (cameraReady) {
-        sendCameraFrame(wsCam);
+        CameraStreamWs::sendFrame(wsCam);
     }
 }

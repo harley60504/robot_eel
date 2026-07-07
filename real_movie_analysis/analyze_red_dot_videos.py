@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,6 +46,18 @@ def parse_args() -> argparse.Namespace:
         help="Start time for steady straight-swim speed fitting after launch/startup.",
     )
     parser.add_argument(
+        "--straight-trim-last-seconds",
+        type=float,
+        default=None,
+        help="Trim this many seconds from each straight/backward video's end instead of using --straight-seconds.",
+    )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help="Only analyze the first N seconds of each video.",
+    )
+    parser.add_argument(
         "--turn-trim-last-seconds",
         type=float,
         default=3.0,
@@ -60,7 +73,25 @@ def parse_args() -> argparse.Namespace:
 
 
 def parse_video_meta(stem: str) -> VideoMeta:
+    normalized = stem.lower()
+    target_match = re.search(r"targetv(\d+)", normalized)
+    if target_match and ("free_swim" in normalized or "swim" in normalized):
+        target_speed = int(target_match.group(1)) / 100.0
+        direction = "backward" if "back" in normalized else "forward"
+        return VideoMeta(direction, "straight_speed", target_speed, "m/s")
+    direction_match = re.search(r"turn_(left|right)", normalized)
+    radius_match = re.search(r"(?:^|_)r(\d{2})(?:_|$)", normalized)
+    yaw_match = re.search(r"(?:^|_)y(\d{2})(?:_|$)", normalized)
+    if direction_match and radius_match:
+        return VideoMeta(direction_match.group(1), "turn_radius", int(radius_match.group(1)) / 10.0, "m")
+    if direction_match and yaw_match:
+        return VideoMeta(direction_match.group(1), "yaw_rate", int(yaw_match.group(1)) / 10.0, "rad/s")
+
     parts = stem.split("_")
+    if stem.startswith("forword") or stem.startswith("forward"):
+        return VideoMeta("forward", "straight_speed", 0.17, "m/s")
+    if stem.startswith("back"):
+        return VideoMeta("backward", "straight_speed", 0.11, "m/s")
     if stem.startswith("string") or stem.startswith("straight"):
         return VideoMeta("straight", "straight", None, None)
     direction = parts[0] if parts else "unknown"
@@ -77,8 +108,11 @@ def resolve(path: Path) -> Path:
 
 
 def color_half(frame: np.ndarray) -> np.ndarray:
-    # The recordings are 1696 x 480: left 848 px is color, right 848 px is depth.
-    return frame[:, : frame.shape[1] // 2].copy()
+    # Legacy recordings are 1696 x 480 (color + depth); current recordings are
+    # already color-only at 848 x 480.
+    if frame.shape[1] >= 1600:
+        return frame[:, : frame.shape[1] // 2].copy()
+    return frame.copy()
 
 
 def red_mask(frame: np.ndarray) -> np.ndarray:
@@ -280,13 +314,90 @@ def fit_turn_metrics(valid_rows: list[dict], px_per_m: float, direction: str) ->
         "" if direction_expected_sign == 0.0 else bool(np.sign(yaw_rate) == np.sign(direction_expected_sign))
     )
 
+    global_radius_m = circle["radius_px"] / px_per_m
+    global_rmse_m = circle["circle_rmse_px"] / px_per_m
+    global_yaw_rate = yaw_rate
+
+    # Split the unwrapped trajectory into complete revolutions. Each revolution
+    # receives its own circle and angular-rate fit so slow center drift does not
+    # get absorbed into one global circle.
+    motion_sign = float(np.sign(yaw_rate)) or 1.0
+    progress = motion_sign * (theta - theta[0])
+    monotonic_progress = np.maximum.accumulate(progress)
+    lap_rows = []
+    lap_start = 0
+    lap_number = 1
+    while True:
+        target = lap_number * 2.0 * np.pi
+        candidates = np.flatnonzero(monotonic_progress >= target)
+        if not len(candidates):
+            break
+        lap_end = int(candidates[0])
+        if lap_end - lap_start >= 5:
+            lap_xy = xy[lap_start : lap_end + 1]
+            lap_t = t[lap_start : lap_end + 1]
+            lap_circle = fit_circle_xy(lap_xy)
+            lap_theta = np.unwrap(
+                np.arctan2(
+                    lap_xy[:, 1] - lap_circle["circle_center_y_px"],
+                    lap_xy[:, 0] - lap_circle["circle_center_x_px"],
+                )
+            )
+            lap_yaw_rate = float(np.polyfit(lap_t - lap_t[0], lap_theta, 1)[0])
+            lap_arc = float(abs(lap_theta[-1] - lap_theta[0]))
+            if lap_arc >= 1.5 * np.pi:
+                lap_rows.append(
+                    {
+                        "lap": lap_number,
+                        "start_s": float(lap_t[0]),
+                        "end_s": float(lap_t[-1]),
+                        "duration_s": float(lap_t[-1] - lap_t[0]),
+                        "circle_center_x_px": float(lap_circle["circle_center_x_px"]),
+                        "circle_center_y_px": float(lap_circle["circle_center_y_px"]),
+                        "radius_px": float(lap_circle["radius_px"]),
+                        "radius_m": float(lap_circle["radius_px"] / px_per_m),
+                        "circle_rmse_m": float(lap_circle["circle_rmse_px"] / px_per_m),
+                        "yaw_rate_rad_s": lap_yaw_rate,
+                        "yaw_rate_abs_rad_s": abs(lap_yaw_rate),
+                        "arc_angle_deg": float(np.degrees(lap_arc)),
+                    }
+                )
+        lap_start = lap_end
+        lap_number += 1
+
+    if lap_rows:
+        radius_values = np.array([lap["radius_m"] for lap in lap_rows])
+        rmse_values = np.array([lap["circle_rmse_m"] for lap in lap_rows])
+        yaw_values = np.array([lap["yaw_rate_rad_s"] for lap in lap_rows])
+        yaw_abs_values = np.abs(yaw_values)
+        measured_radius_m = float(np.mean(radius_values))
+        measured_yaw_rate = float(np.mean(yaw_values))
+        measured_yaw_rate_abs = float(np.mean(yaw_abs_values))
+        circle_rmse_m = float(np.mean(rmse_values))
+    else:
+        radius_values = np.array([global_radius_m])
+        yaw_abs_values = np.array([abs(global_yaw_rate)])
+        measured_radius_m = global_radius_m
+        measured_yaw_rate = global_yaw_rate
+        measured_yaw_rate_abs = abs(global_yaw_rate)
+        circle_rmse_m = global_rmse_m
+
     return {
         "fit_kind": "circle",
         **circle,
-        "measured_radius_m": circle["radius_px"] / px_per_m,
-        "circle_rmse_m": circle["circle_rmse_px"] / px_per_m,
-        "measured_yaw_rate_rad_s": yaw_rate,
-        "measured_yaw_rate_abs_rad_s": abs(yaw_rate),
+        "turn_metric_method": "complete_lap_mean" if lap_rows else "global_fit_fallback",
+        "measured_radius_m": measured_radius_m,
+        "measured_radius_std_m": float(np.std(radius_values)),
+        "circle_rmse_m": circle_rmse_m,
+        "measured_yaw_rate_rad_s": measured_yaw_rate,
+        "measured_yaw_rate_abs_rad_s": measured_yaw_rate_abs,
+        "measured_yaw_rate_std_rad_s": float(np.std(yaw_abs_values)),
+        "complete_lap_count": len(lap_rows),
+        "per_lap_metrics": lap_rows,
+        "global_measured_radius_m": global_radius_m,
+        "global_circle_rmse_m": global_rmse_m,
+        "global_measured_yaw_rate_rad_s": global_yaw_rate,
+        "global_measured_yaw_rate_abs_rad_s": abs(global_yaw_rate),
         "arc_angle_rad": float(abs(theta[-1] - theta[0])),
         "arc_angle_deg": float(abs(np.degrees(theta[-1] - theta[0]))),
         "signed_yaw_direction_matches_filename": signed_matches_direction,
@@ -352,6 +463,9 @@ def compare_command(summary: dict) -> dict:
     elif command_type == "yaw_rate":
         measured = summary.get("measured_yaw_rate_abs_rad_s")
         metric = "yaw_rate_abs_rad_s"
+    elif command_type == "straight_speed":
+        measured = summary.get("straight_speed_m_s")
+        metric = "straight_speed_m_s"
     else:
         measured = None
         metric = ""
@@ -443,7 +557,7 @@ def write_fit_overlay_video(video_path: Path, out_path: Path, rows: list[dict], 
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 30.0)
     source_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
     source_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
-    color_width = source_width // 2
+    color_width = source_width // 2 if source_width >= 1600 else source_width
     writer = cv2.VideoWriter(
         str(out_path),
         cv2.VideoWriter_fourcc(*"mp4v"),
@@ -452,6 +566,8 @@ def write_fit_overlay_video(video_path: Path, out_path: Path, rows: list[dict], 
     )
     frame_index = 0
     while True:
+        if frame_index >= len(rows):
+            break
         ok, frame = cap.read()
         if not ok:
             break
@@ -469,14 +585,19 @@ def analyze_video(
     px_per_m: float,
     straight_start_seconds: float,
     straight_seconds: float,
+    straight_trim_last_seconds: float | None,
     turn_trim_last_seconds: float,
     turn_start_seconds: float,
+    max_seconds: float | None,
 ) -> dict:
     out_dir = out_root / video_path.stem
     clean_dir = out_dir / "representative_clean"
     annotated_dir = out_dir / "representative_annotated"
     clean_dir.mkdir(parents=True, exist_ok=True)
     annotated_dir.mkdir(parents=True, exist_ok=True)
+    for representative_dir in (clean_dir, annotated_dir):
+        for old_path in representative_dir.glob("*.png"):
+            old_path.unlink()
 
     cap = cv2.VideoCapture(str(video_path))
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
@@ -486,14 +607,16 @@ def analyze_video(
 
     rows: list[dict] = []
     frame_index = 0
-    color_width = source_width // 2
+    color_width = source_width // 2 if source_width >= 1600 else source_width
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        time_s = frame_index / fps if fps > 0 else 0.0
+        if max_seconds is not None and time_s > max_seconds:
+            break
         color = color_half(frame)
         detected = detect_red_center(color)
-        time_s = frame_index / fps if fps > 0 else 0.0
         row = {
             "frame_index": frame_index,
             "time_s": time_s,
@@ -527,11 +650,25 @@ def analyze_video(
 
     meta = parse_video_meta(video_path.stem)
     valid_rows = [row for row in rows if row["detected"]]
+    duration_s = frame_count / fps if fps > 0 else 0.0
     title = video_path.stem
     plot_path = out_dir / "red_dot_trajectory.png"
     plot_trajectory(plot_path, rows, title, color_width, source_height)
 
-    chosen = choose_representative_indices(rows, sample_count)
+    if meta.command_type in {"turn_radius", "yaw_rate"}:
+        representative_start_s = turn_start_seconds
+        representative_end_s = max(representative_start_s, duration_s - turn_trim_last_seconds)
+    else:
+        representative_start_s = straight_start_seconds
+        representative_end_s = straight_seconds
+        if straight_trim_last_seconds is not None:
+            representative_end_s = max(representative_start_s, duration_s - straight_trim_last_seconds)
+    representative_rows = [
+        row
+        for row in valid_rows
+        if representative_start_s <= row["time_s"] <= representative_end_s
+    ]
+    chosen = choose_representative_indices(representative_rows, sample_count)
     cap = cv2.VideoCapture(str(video_path))
     clean_paths = []
     annotated_paths = []
@@ -549,7 +686,6 @@ def analyze_video(
         annotated_paths.append(annotated_path)
     cap.release()
 
-    duration_s = frame_count / fps if fps > 0 else 0.0
     detection_rate = len(valid_rows) / len(rows) if rows else 0.0
     if len(valid_rows) >= 2:
         xy = np.array([[row["x_smooth_px"], row["y_smooth_px"]] for row in valid_rows], dtype=float)
@@ -572,11 +708,17 @@ def analyze_video(
         motion_metrics["turn_trim_last_seconds"] = float(turn_trim_last_seconds)
         motion_metrics["turn_start_seconds"] = float(turn_start_seconds)
     else:
+        straight_end_seconds = straight_seconds
+        if straight_trim_last_seconds is not None:
+            straight_end_seconds = max(straight_start_seconds, duration_s - straight_trim_last_seconds)
         motion_metrics = fit_straight_metrics(
             valid_rows,
             px_per_m,
             straight_start_seconds,
-            straight_seconds,
+            straight_end_seconds,
+        )
+        motion_metrics["straight_trim_last_seconds"] = (
+            float(straight_trim_last_seconds) if straight_trim_last_seconds is not None else ""
         )
 
     summary = {
@@ -593,10 +735,15 @@ def analyze_video(
         "color_frame_height_px": source_height,
         "fps": fps,
         "frame_count": frame_count,
+        "analyzed_frame_count": len(rows),
+        "analyzed_duration_s": rows[-1]["time_s"] if rows else 0.0,
         "duration_s": duration_s,
+        "max_seconds": max_seconds if max_seconds is not None else "",
         "px_per_m": px_per_m,
         "detected_frame_count": len(valid_rows),
         "detection_rate": detection_rate,
+        "representative_start_s": float(representative_start_s),
+        "representative_end_s": float(representative_end_s),
         "path_length_px": path_px,
         "path_length_m": path_px / px_per_m,
         "net_displacement_px": net_px,
@@ -638,8 +785,10 @@ def main() -> None:
             args.px_per_m,
             args.straight_start_seconds,
             args.straight_seconds,
+            args.straight_trim_last_seconds,
             args.turn_trim_last_seconds,
             args.turn_start_seconds,
+            args.max_seconds,
         )
         for path in videos
     ]
@@ -653,14 +802,25 @@ def main() -> None:
             "command_unit",
             "fps",
             "frame_count",
+            "analyzed_frame_count",
             "duration_s",
+            "analyzed_duration_s",
+            "max_seconds",
             "px_per_m",
             "detected_frame_count",
             "detection_rate",
+            "representative_start_s",
+            "representative_end_s",
             "fit_kind",
+            "turn_metric_method",
+            "complete_lap_count",
             "measured_radius_m",
+            "measured_radius_std_m",
             "measured_yaw_rate_rad_s",
             "measured_yaw_rate_abs_rad_s",
+            "measured_yaw_rate_std_rad_s",
+            "global_measured_radius_m",
+            "global_measured_yaw_rate_abs_rad_s",
             "commanded_metric",
             "commanded_value",
             "measured_value",
@@ -684,6 +844,7 @@ def main() -> None:
             "straight_measurement_seconds",
             "straight_measurement_end_s",
             "straight_measurement_frame_count",
+            "straight_trim_last_seconds",
             "metric_start_s",
             "metric_end_s",
             "turn_trim_last_seconds",

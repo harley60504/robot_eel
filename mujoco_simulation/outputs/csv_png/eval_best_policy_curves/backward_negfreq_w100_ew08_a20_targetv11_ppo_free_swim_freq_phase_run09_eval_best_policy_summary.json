@@ -1,0 +1,20 @@
+{
+  "name": "backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run09",
+  "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run09_eval_best_policy_trajectory.csv",
+  "eval_best_policy_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\sim_backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run09_eval_best_policy_fitted_rotated.png",
+  "eval_best_selection": "highest_mean_reward",
+  "eval_mean_reward": -34.86315785818506,
+  "eval_episode_reward": -34.86315785818506,
+  "kind": "line",
+  "radius": null,
+  "rmse": 0.011080670845244816,
+  "arc_deg": 0.0,
+  "duration_s": 9.979999999999897,
+  "path_distance_m": 1.3572781355657773,
+  "straight_distance_m": 1.134831554188253,
+  "mean_speed_m_s": 0.13599981318294502,
+  "forward_displacement_m": -1.134792256567807,
+  "mean_forward_speed_m_s": -0.11370663893465117,
+  "lateral_drift_m": 0.009444088895729064,
+  "actual_yaw_rate_rad_s": 0.04961893587934018
+}

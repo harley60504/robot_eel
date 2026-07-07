@@ -216,10 +216,12 @@ def build_train_cmd(args: argparse.Namespace, name: str, output_base: Path, eval
         ("freq_high", "--freq-high"),
         ("wavelength", "--wavelength"),
         ("ajoint", "--ajoint"),
+        ("start_x", "--start-x"),
+        ("start_y", "--start-y"),
         ("phase_lag_low", "--phase-lag-low"),
         ("phase_lag_high", "--phase-lag-high"),
         ("target_speed", "--target-speed"),
-        ("speed_tolerance", "--speed-tolerance"),
+        ("speed_error_weight", "--speed-error-weight"),
         ("energy_weight", "--energy-weight"),
         ("reward_average_seconds", "--reward-average-seconds"),
         ("boundary_x_min", "--boundary-x-min"),
@@ -374,9 +376,9 @@ def write_mean_gait_json(name: str, cfg: FreeSwimConfig, model_path: Path, arr: 
     return gait_path, diagnostics
 
 
-def write_fixed_gait_trajectory(name: str, gait_path: Path) -> dict:
+def write_fixed_gait_trajectory(name: str, gait_path: Path, cfg: FreeSwimConfig) -> dict:
     TRAJ_DIR.mkdir(parents=True, exist_ok=True)
-    gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, 30.0, DEFAULT_START_X, DEFAULT_START_Y)
+    gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, 30.0, cfg.start_x, cfg.start_y)
     if arr.shape[0] < 2:
         raise RuntimeError(f"{name} fixed gait trajectory has too few points")
     summary = summarize(arr, 0.0)
@@ -386,7 +388,7 @@ def write_fixed_gait_trajectory(name: str, gait_path: Path) -> dict:
     np.savetxt(csv_path, arr, delimiter=",", header="time,x,y,yaw", comments="")
 
     fig, ax = plt.subplots(figsize=(7, 5), dpi=170)
-    draw_environment(ax, DEFAULT_START_X, DEFAULT_START_Y)
+    draw_environment(ax, cfg.start_x, cfg.start_y)
     plot_one(ax, name, arr, summary)
     ax.set_aspect("equal", adjustable="box")
     ax.grid(True, alpha=0.25)
@@ -535,7 +537,7 @@ def run_one(args: argparse.Namespace, run_idx: int, cfg: FreeSwimConfig) -> None
         )
         row["gait_json"] = str(gait_path)
         row["export_diagnostics"] = json.dumps(diagnostics, sort_keys=True)
-        row.update(write_fixed_gait_trajectory(name, gait_path))
+        row.update(write_fixed_gait_trajectory(name, gait_path, cfg))
         row.update(write_fixed_gait_fitted(name, Path(row["trajectory_csv"])))
         eval_summary = evaluate_policy(model_path, cfg, args.eval_episodes)
         row.update(eval_summary)
@@ -570,10 +572,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wavelength", type=float, default=None)
     parser.add_argument("--ajoint", type=float, default=None)
     parser.add_argument("--fixed-amp-scales", type=lambda value: parse_float_list(value, 6, "fixed-amp-scales"), default=None)
+    parser.add_argument("--start-x", type=float, default=None)
+    parser.add_argument("--start-y", type=float, default=None)
     parser.add_argument("--phase-lag-low", type=float, default=None)
     parser.add_argument("--phase-lag-high", type=float, default=None)
     parser.add_argument("--target-speed", type=float, default=None)
-    parser.add_argument("--speed-tolerance", type=float, default=None)
+    parser.add_argument("--speed-error-weight", type=float, default=None)
+    parser.add_argument("--speed-tolerance", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--energy-weight", type=float, default=None)
     parser.add_argument("--reward-average-seconds", type=float, default=None)
     parser.add_argument("--boundary-x-min", type=float, default=None)
@@ -622,7 +627,7 @@ def main() -> None:
                 "phase_lag_low": cfg.phase_lag_low,
                 "phase_lag_high": cfg.phase_lag_high,
                 "target_speed": cfg.target_speed,
-                "speed_tolerance": cfg.speed_tolerance,
+                "speed_error_weight": cfg.speed_error_weight,
                 "energy_weight": cfg.energy_weight,
                 "reward_average_seconds": cfg.reward_average_seconds,
             },

@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Backward targetv11 live eval reward</title>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #f7f7f7; color: #222; }
+    header { padding: 10px 16px; background: #fff; border-bottom: 1px solid #ddd; }
+    img { display: block; width: min(96vw, 1200px); margin: 16px auto; background: #fff; box-shadow: 0 1px 5px rgba(0,0,0,.12); }
+    .small { color: #666; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>Backward targetv11 live eval reward</div>
+    <div class="small">Auto refresh every 5 seconds. Last refresh: <span id="time"></span></div>
+  </header>
+  <img id="plot" src="backward_negfreq_w100_ew08_a20_targetv11_live_current_reward.png" alt="live reward plot">
+  <script>
+    const img = document.getElementById("plot");
+    const time = document.getElementById("time");
+    function refresh() {
+      img.src = "backward_negfreq_w100_ew08_a20_targetv11_live_current_reward.png?t=" + Date.now();
+      time.textContent = new Date().toLocaleTimeString();
+    }
+    refresh();
+    setInterval(refresh, 5000);
+  </script>
+</body>
+</html>

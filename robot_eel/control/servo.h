@@ -3,11 +3,11 @@
 #include "config.h"
 #include "utils.h"
 #include "cpg.h"
-#include "ServoStatusUART.h"
+#include "ServoStatusPacket.h"
 
 // ✅ 新增：UART Angle Packet
-#include "AnglePacket.h"
-#include "ControltoCamera.h"
+#include "ServoTargetPacket.h"
+#include "ControlParamsPacket.h"
 // ✅ UART 角度快取（由 RX Task 更新）
 extern volatile bool g_haveAngleCmd;
 extern float g_uartTargetDeg[bodyNum];
@@ -127,7 +127,7 @@ void servoTask(void *pv)
       /* ========= 4. 建立封包 SNAPSHOT ========= */
       if (xSemaphoreTake(statusMutex, portMAX_DELAY))
       {
-        g_status.header = SERVO_STATUS_HEADER;
+        g_status.header = SERVO_STATUS_PACKET_HEADER;
         g_status.count  = bodyNum;
         g_status.seq    = seq++;
 
@@ -138,7 +138,7 @@ void servoTask(void *pv)
           g_status.errorDeg[i]  = servoState[i].errorDeg;
         }
 
-        g_status.checksum = calcControlChecksum(
+        g_status.checksum = calcPacketChecksum(
           (uint8_t*)&g_status,
           sizeof(ServoStatusPacket) - 1
         );

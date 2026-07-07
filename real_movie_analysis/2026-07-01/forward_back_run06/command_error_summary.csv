@@ -1,0 +1,3 @@
+video_name,direction,commanded_metric,commanded_value,measured_value,error,abs_error,percent_error,measured_radius_m,measured_yaw_rate_abs_rad_s,circle_rmse_m
+back_run06.mp4,backward,straight_speed_m_s,0.11,0.036715378790843155,-0.07328462120915685,0.07328462120915685,-66.62238291741532,,,
+forword_run06.mp4,forward,straight_speed_m_s,0.17,0.1626430875937822,-0.007356912406217803,0.007356912406217803,-4.327595533069295,,,

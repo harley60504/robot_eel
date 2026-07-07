@@ -1,0 +1,2 @@
+video_name,direction,commanded_metric,commanded_value,measured_value,error,abs_error,percent_error,measured_radius_m,measured_yaw_rate_abs_rad_s,circle_rmse_m
+right_y07_2.mp4,right,yaw_rate_abs_rad_s,0.7,0.5828103355592662,-0.11718966444073375,0.11718966444073375,-16.741380634390538,0.25363922807547035,0.5828103355592662,0.074454199529883

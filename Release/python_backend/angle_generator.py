@@ -26,6 +26,7 @@ LAST_GAIT_FILE = Path(__file__).resolve().parent / ".last_gait.json"
 class GaitPreset:
     key: str
     label: str
+    source_path: str
     ajoint: float
     frequency: float
     lambda_: float
@@ -87,6 +88,7 @@ def _json_to_gait_preset(path):
     return GaitPreset(
         key=name,
         label=f"RL {name}",
+        source_path=str(Path(path).expanduser().resolve()),
         ajoint=ajoint,
         frequency=frequency,
         lambda_=lambda_,
@@ -274,6 +276,7 @@ def list_gaits():
         {
             "key": gait.key,
             "label": gait.label,
+            "source_path": gait.source_path,
             "ajoint": gait.ajoint,
             "frequency": gait.frequency,
             "lambda": gait.lambda_,
@@ -304,6 +307,24 @@ def set_gait(key):
 
 def current_gait():
     return _gait()
+
+
+def current_gait_metadata():
+    gait = _gait()
+    return {
+        "key": gait.key,
+        "label": gait.label,
+        "source_path": gait.source_path,
+        "ajoint": gait.ajoint,
+        "frequency": gait.frequency,
+        "lambda": gait.lambda_,
+        "L": gait.body_length,
+        "alpha": gait.alpha,
+        "k_couple": gait.k_couple,
+        "amp_scales": list(gait.amp_scales),
+        "phase_lags": list(gait.phase_lags),
+        "joint_bias_deg": list(gait.joint_bias_deg),
+    }
 
 
 def generate_cpg_params(t, dt):

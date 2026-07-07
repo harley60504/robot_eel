@@ -252,10 +252,13 @@ def parse_args():
     parser.add_argument("--wavelength", type=float, default=None)
     parser.add_argument("--ajoint", type=float, default=None, help="Base joint angle amplitude in degrees.")
     parser.add_argument("--fixed-amp-scales", type=lambda value: parse_float_list(value, 6, "fixed-amp-scales"), default=None)
+    parser.add_argument("--start-x", type=float, default=None)
+    parser.add_argument("--start-y", type=float, default=None)
     parser.add_argument("--phase-lag-low", type=float, default=None)
     parser.add_argument("--phase-lag-high", type=float, default=None)
     parser.add_argument("--target-speed", type=float, default=None)
-    parser.add_argument("--speed-tolerance", type=float, default=None)
+    parser.add_argument("--speed-error-weight", type=float, default=None)
+    parser.add_argument("--speed-tolerance", type=float, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--energy-weight", type=float, default=None)
     parser.add_argument("--reward-average-seconds", type=float, default=None)
     parser.add_argument("--boundary-x-min", type=float, default=None)
@@ -287,14 +290,20 @@ def config_from_args(args) -> FreeSwimConfig:
         cfg.fixed_ajoint = degrees_to_radians(args.ajoint)
     if args.fixed_amp_scales is not None:
         cfg.fixed_amp_scales = args.fixed_amp_scales
+    if args.start_x is not None:
+        cfg.start_x = args.start_x
+    if args.start_y is not None:
+        cfg.start_y = args.start_y
     if args.phase_lag_low is not None:
         cfg.phase_lag_low = args.phase_lag_low
     if args.phase_lag_high is not None:
         cfg.phase_lag_high = args.phase_lag_high
     if args.target_speed is not None:
         cfg.target_speed = args.target_speed
-    if args.speed_tolerance is not None:
-        cfg.speed_tolerance = args.speed_tolerance
+    if args.speed_error_weight is not None:
+        cfg.speed_error_weight = args.speed_error_weight
+    elif args.speed_tolerance is not None:
+        cfg.speed_error_weight = args.speed_tolerance
     if args.energy_weight is not None:
         cfg.energy_weight = args.energy_weight
     if args.reward_average_seconds is not None:

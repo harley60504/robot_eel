@@ -11,6 +11,7 @@ class ApiConfig {
   static String get httpBaseUrl => "http://$host";
   static String get wsControlUrl => "ws://$host:82";
   static String get wsStreamUrl => "ws://$host:81";
+  static String get wsServoStatusUrl => "ws://$host:84";
   static String get pythonBaseUrl => "http://$pythonHost:$pythonPort";
 
   static Future<void> load() async {

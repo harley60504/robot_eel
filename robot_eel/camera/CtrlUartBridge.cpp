@@ -4,19 +4,19 @@
 // ==== UART & 解包狀態 ====
 static HardwareSerial* g_ser = nullptr;
 
-// ControlPacket RX parser
-static ControlRxState g_ctrlRx;
+// ControlParamsPacket RX parser
+static ControlParamsRxState g_ctrlRx;
 
-// ServoStatus RX state
-static uint8_t buf[sizeof(ServoStatus)];
+// ServoStatusPacket RX state
+static uint8_t buf[sizeof(ServoStatusPacket)];
 static size_t idx = 0;
 static bool receivingServo = false;
 
-static const size_t SERVO_PKT_SIZE = sizeof(ServoStatus);
+static const size_t SERVO_PKT_SIZE = sizeof(ServoStatusPacket);
 
 // callbacks
-std::function<void(const ControlPacket&)> CtrlUartBridge::onCtrlParams = nullptr;
-std::function<void(const ServoStatus&)> CtrlUartBridge::onServoStatus = nullptr;
+std::function<void(const ControlParamsPacket&)> CtrlUartBridge::onCtrlParams = nullptr;
+std::function<void(const ServoStatusPacket&)> CtrlUartBridge::onServoStatusPacket = nullptr;
 
 // ==================================================
 // UART RX Task
@@ -30,7 +30,7 @@ static void uartRxTask(void *pv)
       uint8_t b = g_ser->read();
 
       // =====================================================
-      // 1) ServoStatus (0xBB)
+      // 1) ServoStatusPacket (0xBB)
       // =====================================================
       if (receivingServo)
       {
@@ -40,21 +40,21 @@ static void uartRxTask(void *pv)
         {
           receivingServo = false;
 
-          if (buf[0] == SERVO_STATUS_HEADER)
+          if (buf[0] == SERVO_STATUS_PACKET_HEADER)
           {
-            ServoStatus ss;
+            ServoStatusPacket ss;
             memcpy(&ss, buf, SERVO_PKT_SIZE);
 
-            uint8_t cs = calcControlChecksum(
+            uint8_t cs = calcPacketChecksum(
               reinterpret_cast<uint8_t*>(&ss),
               SERVO_PKT_SIZE - 1
             );
 
             if (cs == ss.checksum)
             {
-              if (CtrlUartBridge::onServoStatus)
+              if (CtrlUartBridge::onServoStatusPacket)
               {
-                CtrlUartBridge::onServoStatus(ss);
+                CtrlUartBridge::onServoStatusPacket(ss);
               }
             }
           }
@@ -65,11 +65,11 @@ static void uartRxTask(void *pv)
       }
 
       // =====================================================
-      // 2) ControlPacket (0xAA)
+      // 2) ControlParamsPacket (0xAA)
       // =====================================================
       if (g_ctrlRx.receiving)
       {
-        if (feedControlRx(g_ctrlRx, b))
+        if (feedControlParamsRx(g_ctrlRx, b))
         {
           if (CtrlUartBridge::onCtrlParams)
           {
@@ -82,7 +82,7 @@ static void uartRxTask(void *pv)
       // =====================================================
       // 3) Idle：只認 header
       // =====================================================
-      if (b == SERVO_STATUS_HEADER)
+      if (b == SERVO_STATUS_PACKET_HEADER)
       {
         receivingServo = true;
         idx = 0;
@@ -90,9 +90,9 @@ static void uartRxTask(void *pv)
         continue;
       }
 
-      if (b == CONTROL_PACKET_HEADER)
+      if (b == CONTROL_PARAMS_PACKET_HEADER)
       {
-        feedControlRx(g_ctrlRx, b);
+        feedControlParamsRx(g_ctrlRx, b);
         continue;
       }
 
@@ -106,7 +106,7 @@ static void uartRxTask(void *pv)
 // ==================================================
 // TX：控制參數（camera → 控制板）
 // ==================================================
-void CtrlUartBridge::sendCtrlParams(const ControlPacket &pkt)
+void CtrlUartBridge::sendCtrlParams(const ControlParamsPacket &pkt)
 {
   if (!g_ser) return;
 
@@ -126,7 +126,7 @@ void CtrlUartBridge::sendCtrlParams(const ControlPacket &pkt)
 }
 
 // ==================================================
-// TX：AnglePacket（camera → 控制板）
+// TX：ServoTargetPacket（camera → 控制板）
 // ==================================================
 void CtrlUartBridge::sendAngle(const float* targetDeg, uint8_t count)
 {
@@ -137,7 +137,7 @@ void CtrlUartBridge::sendAngle(const float* targetDeg, uint8_t count)
 
   static uint32_t seq = 0;
 
-  sendAnglePacketUART(
+  sendServoTargetPacketUART(
     *g_ser,
     targetDeg,
     count,
@@ -154,7 +154,7 @@ void CtrlUartBridge::sendServoCenter(const float* centerDeg, uint8_t count, bool
 
   static uint32_t seq = 0;
 
-  sendCenterPacketUART(
+  sendServoCenterPacketUART(
     *g_ser,
     centerDeg,
     count,

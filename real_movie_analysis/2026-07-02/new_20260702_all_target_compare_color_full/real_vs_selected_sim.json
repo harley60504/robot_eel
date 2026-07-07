@@ -1,0 +1,143 @@
+[
+  {
+    "task": "forward",
+    "selected_gait_json": "w100_ew08_a20_targetv17_ppo_free_swim_freq_phase_run03.json",
+    "metric": "speed_m_s",
+    "sim_measured": 0.16967144934381884,
+    "real_run_values": [
+      0.16773880486240272,
+      0.1789633128631319,
+      0.1738565909524306
+    ],
+    "real_mean": 0.17351956955932177,
+    "real_minus_sim": 0.0038481202155029315,
+    "real_vs_sim_percent": 2.2679833468653747,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_free_swim_10_targetv17_w100_ew08_a20_extracted_figures\\fixed_gait_trajectories_after_mean\\w100_ew08_a20_targetv17_ppo_free_swim_freq_phase_run03_summary.json"
+  },
+  {
+    "task": "backward",
+    "selected_gait_json": "backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03.json",
+    "metric": "speed_m_s",
+    "sim_measured": 0.1110866814196897,
+    "real_run_values": [
+      0.03536318946952115,
+      0.039871858322521
+    ],
+    "real_mean": 0.03761752389602108,
+    "real_minus_sim": -0.07346915752366863,
+    "real_vs_sim_percent": -66.13678308212248,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_backward_swim_10_targetv11_w100_ew08_a20_extracted_figures\\fixed_gait_trajectories_after_mean\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run03_summary.json"
+  },
+  {
+    "task": "left_r03",
+    "selected_gait_json": "paper80_ppo_turn_left_a20_r03_run09.json",
+    "metric": "radius_m",
+    "sim_measured": 0.30646575171964535,
+    "real_run_values": [
+      0.39125674818179607,
+      0.3956140757004622
+    ],
+    "real_mean": 0.39343541194112913,
+    "real_minus_sim": 0.08696966022148378,
+    "real_vs_sim_percent": 28.3782640420596,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_80_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper80_ppo_turn_left_a20_r03_run09_fitted_summary.json"
+  },
+  {
+    "task": "right_r03",
+    "selected_gait_json": "paper80_ppo_turn_right_a20_r03_run09.json",
+    "metric": "radius_m",
+    "sim_measured": 0.28708454896054436,
+    "real_run_values": [
+      0.2827898586895694,
+      0.2807565927111941
+    ],
+    "real_mean": 0.28177322570038177,
+    "real_minus_sim": -0.005311323260162593,
+    "real_vs_sim_percent": -1.8500902536877935,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_80_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper80_ppo_turn_right_a20_r03_run09_fitted_summary.json"
+  },
+  {
+    "task": "left_r05",
+    "selected_gait_json": "paper_ppo_turn_left_a20_r05_run01.json",
+    "metric": "radius_m",
+    "sim_measured": 0.4516514032124546,
+    "real_run_values": [
+      0.6476870723854112,
+      0.5976524081056407
+    ],
+    "real_mean": 0.6226697402455259,
+    "real_minus_sim": 0.1710183370330713,
+    "real_vs_sim_percent": 37.865118057128036,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_40_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper_ppo_turn_left_a20_r05_run01_fitted_summary.json"
+  },
+  {
+    "task": "right_r05",
+    "selected_gait_json": "paper_ppo_turn_right_a20_r05_run04.json",
+    "metric": "radius_m",
+    "sim_measured": 0.503980888465723,
+    "real_run_values": [
+      0.5723195042575238,
+      0.5462061441629676
+    ],
+    "real_mean": 0.5592628242102458,
+    "real_minus_sim": 0.05528193574452278,
+    "real_vs_sim_percent": 10.969053987903878,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_40_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper_ppo_turn_right_a20_r05_run04_fitted_summary.json"
+  },
+  {
+    "task": "left_y07",
+    "selected_gait_json": "paper80_ppo_turn_left_a20_y07_run02.json",
+    "metric": "yaw_rate_rad_s",
+    "sim_measured": 0.6967609908819524,
+    "real_run_values": [
+      0.4888882993481356,
+      0.5097974889663335
+    ],
+    "real_mean": 0.49934289415723454,
+    "real_minus_sim": -0.19741809672471788,
+    "real_vs_sim_percent": -28.333689645114635,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_80_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper80_ppo_turn_left_a20_y07_run02_fitted_summary.json"
+  },
+  {
+    "task": "right_y07",
+    "selected_gait_json": "paper80_ppo_turn_right_a20_y07_run07.json",
+    "metric": "yaw_rate_rad_s",
+    "sim_measured": 0.6793958423305638,
+    "real_run_values": [
+      0.4847002021420815,
+      0.48769010494873627
+    ],
+    "real_mean": 0.4861951535454089,
+    "real_minus_sim": -0.19320068878515495,
+    "real_vs_sim_percent": -28.43713145526612,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_80_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper80_ppo_turn_right_a20_y07_run07_fitted_summary.json"
+  },
+  {
+    "task": "left_y05",
+    "selected_gait_json": "paper_ppo_turn_left_a20_y05_run08.json",
+    "metric": "yaw_rate_rad_s",
+    "sim_measured": 0.4980971775440336,
+    "real_run_values": [
+      0.3423159960953347,
+      0.3511203340635183
+    ],
+    "real_mean": 0.3467181650794265,
+    "real_minus_sim": -0.1513790124646071,
+    "real_vs_sim_percent": -30.391461604141423,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_40_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper_ppo_turn_left_a20_y05_run08_fitted_summary.json"
+  },
+  {
+    "task": "right_y05",
+    "selected_gait_json": "paper_ppo_turn_right_a20_y05_run04.json",
+    "metric": "yaw_rate_rad_s",
+    "sim_measured": 0.5105026989849535,
+    "real_run_values": [
+      0.4251609210355175,
+      0.4091590280840466
+    ],
+    "real_mean": 0.41715997455978204,
+    "real_minus_sim": -0.09334272442517144,
+    "real_vs_sim_percent": -18.2844722683675,
+    "sim_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\paper_ppo_40_extracted_figures\\fixed_gait_fitted_rotated_after_mean\\paper_ppo_turn_right_a20_y05_run04_fitted_summary.json"
+  }
+]

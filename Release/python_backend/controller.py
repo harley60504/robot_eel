@@ -1,6 +1,9 @@
 import time
 import json
+import shutil
 import threading
+from urllib.error import URLError
+from urllib.request import urlopen
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,6 +15,7 @@ from pydantic import BaseModel
 
 from angle_generator import (
     current_gait,
+    current_gait_metadata,
     generate_angles,
     generate_cpg_params,
     init_generator,
@@ -31,6 +35,11 @@ except ImportError:
 seq_counter = 0
 measure_enabled = False
 csv_lines = ["seq,rtt_ms,status"]
+rtt_pending = {}
+rtt_lock = threading.Lock()
+RTT_TIMEOUT_SEC = 1.0
+RTT_ACK_RECV_TIMEOUT_SEC = 0.001
+RTT_ACK_DRAIN_LIMIT = 8
 BASE_DIR = Path(__file__).resolve().parent
 recording_stop_event = threading.Event()
 recording_thread = None
@@ -60,7 +69,7 @@ def save_csv():
 class ControlState:
     running: bool = False
     esp_host: str = "192.168.4.1"
-    esp_ws_port: int = 82
+    esp_ws_port: int = 83
     interval_ms: int = 50
     output_mode: str = "cpg"     # "angle" = mode 3 + set_angle, "cpg" = mode 1 + set_param
     angle_mode_id: int = 3
@@ -90,7 +99,7 @@ GOPRO_DEFAULT_PREVIEW_PORT = 8554
 # =========================
 class HostReq(BaseModel):
     esp_host: str
-    esp_ws_port: int = 82
+    esp_ws_port: int = 83
 
 class IntervalReq(BaseModel):
     interval_ms: int
@@ -210,9 +219,16 @@ class RealSenseD435iCapture:
 
         self.pipeline = rs.pipeline()
         config = rs.config()
-        config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
-        config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
-        self.align = rs.align(rs.stream.color)
+        self.width = width
+        self.height = height
+        self.fps = float(fps)
+        if self.output_mode == "color":
+            config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+        else:
+            config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+            if self.output_mode == "color_depth":
+                config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+        self.align = rs.align(rs.stream.color) if self.output_mode == "color_depth" else None
         self.colorizer = rs.colorizer()
         self.colorizer.set_option(rs.option.color_scheme, 0)
         self.colorizer.set_option(rs.option.histogram_equalization_enabled, 1)
@@ -220,7 +236,6 @@ class RealSenseD435iCapture:
         self.colorizer.set_option(rs.option.max_distance, 4.0)
         self.profile = self.pipeline.start(config)
         self.opened = True
-        self.fps = float(fps)
 
     def isOpened(self):
         return self.opened
@@ -228,18 +243,28 @@ class RealSenseD435iCapture:
     def read(self):
         try:
             frames = self.pipeline.wait_for_frames(timeout_ms=700)
-            aligned_frames = self.align.process(frames)
-            color_frame = aligned_frames.get_color_frame()
-            depth_frame = aligned_frames.get_depth_frame()
-            if not color_frame or not depth_frame:
+            if self.output_mode == "color":
+                color_frame = frames.get_color_frame()
+                if not color_frame:
+                    return False, None
+                color_image = np.asanyarray(color_frame.get_data())
+                return True, color_image
+
+            if self.output_mode == "color_depth":
+                frames = self.align.process(frames)
+
+            depth_frame = frames.get_depth_frame()
+            if not depth_frame:
                 return False, None
-            color_image = np.asanyarray(color_frame.get_data())
             depth_color_frame = self.colorizer.colorize(depth_frame)
             depth_image = np.asanyarray(depth_color_frame.get_data())
-            if self.output_mode == "color":
-                return True, color_image
             if self.output_mode == "depth":
                 return True, depth_image
+
+            color_frame = frames.get_color_frame()
+            if not color_frame:
+                return False, None
+            color_image = np.asanyarray(color_frame.get_data())
             return True, np.hstack((color_image, depth_image))
         except Exception as e:
             print("[REALSENSE] frame read failed:", e)
@@ -305,28 +330,53 @@ def send_angle_rtt(ws, angles):
 
     t1 = time.perf_counter_ns()
     ws.send(json.dumps(payload))
-    deadline = time.time() + 1.0
+    with rtt_lock:
+        rtt_pending[seq] = t1
 
-    while time.time() < deadline:
+def drain_rtt_acks(ws):
+    ws.settimeout(RTT_ACK_RECV_TIMEOUT_SEC)
+
+    for _ in range(RTT_ACK_DRAIN_LIMIT):
         try:
             msg = ws.recv()
             t2 = time.perf_counter_ns()
         except WebSocketTimeoutException:
-            continue
+            break
 
         try:
             data = json.loads(msg)
         except Exception:
             continue
 
-        if data.get("type") == "angle_ack" and data.get("seq") == seq:
-            rtt = (t2 - t1) / 1e6
-            csv_lines.append(f"{seq},{rtt:.2f},ok")
-            print(f"[RTT] {rtt:.2f} ms")
-            return
+        if data.get("type") != "angle_ack":
+            continue
 
-    csv_lines.append(f"{seq},,timeout")
-    print(f"[RTT] timeout seq={seq}")
+        seq = data.get("seq")
+        with rtt_lock:
+            t1 = rtt_pending.pop(seq, None)
+
+        if t1 is None:
+            continue
+
+        rtt = (t2 - t1) / 1e6
+        csv_lines.append(f"{seq},{rtt:.2f},ok")
+        print(f"[RTT] {rtt:.2f} ms")
+
+def sweep_rtt_timeouts():
+    cutoff = time.perf_counter_ns() - int(RTT_TIMEOUT_SEC * 1e9)
+
+    with rtt_lock:
+        timed_out = [
+            seq
+            for seq, t1 in rtt_pending.items()
+            if t1 < cutoff
+        ]
+        for seq in timed_out:
+            rtt_pending.pop(seq, None)
+
+    for seq in timed_out:
+        csv_lines.append(f"{seq},,timeout")
+        print(f"[RTT] timeout seq={seq}")
 
 def send_params(ws, params):
     payload = {
@@ -373,11 +423,132 @@ def open_video_writer(path, width, height, fps):
         writer.release()
     return None, None
 
-def new_recording_path():
+def safe_filename_part(value):
+    safe = "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in str(value).strip())
+    return safe.strip("._") or "unknown_gait"
+
+def recording_gait_name(gait_info=None):
+    source_path = (gait_info or {}).get("source_path")
+    if source_path:
+        return Path(source_path).stem
+    return (gait_info or {}).get("key", "unknown_gait")
+
+def snapshot_recording_gait():
+    try:
+        return current_gait_metadata()
+    except Exception as exc:
+        return {"key": "unknown_gait", "error": str(exc)}
+
+def new_recording_path(gait_info=None):
     recordings_dir = Path(__file__).resolve().parent / "recordings"
     recordings_dir.mkdir(exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    return recordings_dir / f"clean_v_{timestamp}.mp4"
+    gait_name = recording_gait_name(gait_info)
+    return recordings_dir / f"clean_v_{timestamp}_{safe_filename_part(gait_name)}.mp4"
+
+def recording_metadata_path(video_path):
+    return Path(video_path).with_name(f"{Path(video_path).stem}_recording.json")
+
+def recording_gait_copy_path(video_path):
+    return Path(video_path).with_name(f"{Path(video_path).stem}_gait.json")
+
+def recording_servo_csv_path(video_path):
+    return Path(video_path).with_name(f"{Path(video_path).stem}_servo_status.csv")
+
+def esp_http_base_url():
+    with state_lock:
+        host = state.esp_host.strip()
+    return f"http://{host}"
+
+def clear_servo_status_log():
+    try:
+        with urlopen(f"{esp_http_base_url()}/servo_log_clear", timeout=2.0) as res:
+            ok = res.status == 200
+        print("[SERVO CSV] cleared" if ok else "[SERVO CSV] clear failed")
+        return ok
+    except (OSError, URLError, TimeoutError) as exc:
+        print("[SERVO CSV] clear failed:", exc)
+        return False
+
+def download_servo_status_csv(video_path):
+    csv_path = recording_servo_csv_path(video_path)
+    try:
+        with urlopen(f"{esp_http_base_url()}/servo_log.csv", timeout=45.0) as res:
+            data = res.read()
+            if res.status != 200:
+                print("[SERVO CSV] download failed status:", res.status)
+                return None
+        csv_path.write_bytes(data)
+        print("[SERVO CSV] saved:", csv_path)
+        return str(csv_path.resolve())
+    except (OSError, URLError, TimeoutError) as exc:
+        print("[SERVO CSV] download failed:", exc)
+        return None
+
+def write_recording_metadata(video_path, gait_info, *, codec=None, fps=None, width=None, height=None, status="recording"):
+    video_path = Path(video_path)
+    path = recording_metadata_path(video_path)
+    existing = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+
+    if (not gait_info or "key" not in gait_info) and isinstance(existing.get("gait"), dict):
+        gait_info = existing["gait"]
+
+    source_path = gait_info.get("source_path") if isinstance(gait_info, dict) else None
+    gait_copy = existing.get("gait_json_copy")
+    if source_path:
+        source = Path(source_path)
+        if source.exists():
+            gait_copy_path = recording_gait_copy_path(video_path)
+            try:
+                shutil.copy2(source, gait_copy_path)
+                gait_copy = str(gait_copy_path.resolve())
+            except OSError as exc:
+                print("[REC] gait JSON copy failed:", exc)
+
+    metadata = {
+        "status": status,
+        "created_at": existing.get("created_at", time.strftime("%Y-%m-%d %H:%M:%S")),
+        "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "video_path": str(video_path.resolve()),
+        "servo_status_csv": existing.get("servo_status_csv"),
+        "gait_key": gait_info.get("key") if isinstance(gait_info, dict) else None,
+        "gait_json_source": source_path,
+        "gait_json_copy": gait_copy,
+        "gait": gait_info,
+        "codec": codec if codec is not None else existing.get("codec"),
+        "fps": fps if fps is not None else existing.get("fps"),
+        "width": width if width is not None else existing.get("width"),
+        "height": height if height is not None else existing.get("height"),
+        "camera_mode": state.camera_mode,
+        "recorder_url": state.recorder_url,
+        "output_mode": state.output_mode,
+    }
+    path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+def attach_servo_status_csv(video_path, gait_info):
+    csv_path = download_servo_status_csv(video_path)
+    if not csv_path:
+        return None
+
+    metadata_path = recording_metadata_path(video_path)
+    metadata = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+    metadata["servo_status_csv"] = csv_path
+    metadata["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if "gait" not in metadata:
+        metadata["gait"] = gait_info
+    metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return csv_path
 
 def open_camera_capture(url):
     if use_realsense():
@@ -435,7 +606,8 @@ def recording_loop():
     if fps <= 1 or fps > 120:
         fps = 20.0
 
-    path = new_recording_path()
+    gait_info = snapshot_recording_gait()
+    path = new_recording_path(gait_info)
     writer, codec = open_video_writer(path, record_w, record_h, fps)
     if writer is None:
         path = path.with_suffix(".avi")
@@ -453,8 +625,18 @@ def recording_loop():
     with state_lock:
         state.recording = True
         state.recording_path = str(path)
+    metadata_path = write_recording_metadata(
+        path,
+        gait_info,
+        codec=codec,
+        fps=float(fps),
+        width=int(record_w),
+        height=int(record_h),
+        status="recording",
+    )
 
     print(f"[REC] start ({codec}): {path}")
+    print(f"[REC] metadata: {metadata_path}")
 
     try:
         current = first_clean_frame
@@ -472,6 +654,16 @@ def recording_loop():
         release_camera_source("REC", used_gopro)
         with state_lock:
             state.recording = False
+        write_recording_metadata(
+            path,
+            gait_info,
+            codec=codec,
+            fps=float(fps),
+            width=int(record_w),
+            height=int(record_h),
+            status="saved",
+        )
+        attach_servo_status_csv(path, gait_info)
         print("[REC] saved:", path)
 
 def make_preview_frame(frame):
@@ -527,7 +719,8 @@ def preview_loop():
             if should_record:
                 if preview_record_writer is None:
                     record_h, record_w = frame.shape[:2]
-                    path = Path(record_path) if record_path else new_recording_path()
+                    gait_info = snapshot_recording_gait()
+                    path = Path(record_path) if record_path else new_recording_path(gait_info)
                     writer, codec = open_video_writer(path, record_w, record_h, record_fps)
                     if writer is None:
                         path = path.with_suffix(".avi")
@@ -542,12 +735,26 @@ def preview_loop():
                         preview_record_codec = codec
                         with state_lock:
                             state.recording_path = str(path)
+                        metadata_path = write_recording_metadata(
+                            path,
+                            gait_info,
+                            codec=codec,
+                            fps=float(record_fps),
+                            width=int(record_w),
+                            height=int(record_h),
+                            status="recording",
+                        )
                         print(f"[PREVIEW REC] start ({codec}): {path}")
+                        print(f"[PREVIEW REC] metadata: {metadata_path}")
 
                 if preview_record_writer is not None:
                     preview_record_writer.write(frame)
             elif preview_record_writer is not None:
                 preview_record_writer.release()
+                if record_path:
+                    gait_info = snapshot_recording_gait()
+                    write_recording_metadata(Path(record_path), gait_info, status="saved")
+                    attach_servo_status_csv(Path(record_path), gait_info)
                 print("[PREVIEW REC] saved:", record_path)
                 preview_record_writer = None
                 preview_record_codec = None
@@ -569,7 +776,13 @@ def preview_loop():
                 last = now
     finally:
         if preview_record_writer is not None:
+            with state_lock:
+                final_record_path = state.recording_path
             preview_record_writer.release()
+            if final_record_path:
+                gait_info = snapshot_recording_gait()
+                write_recording_metadata(Path(final_record_path), gait_info, status="saved")
+                attach_servo_status_csv(Path(final_record_path), gait_info)
             preview_record_writer = None
             preview_record_codec = None
         cap.release()
@@ -613,6 +826,7 @@ def control_loop():
 
     t0 = time.time()
     last_time = t0
+    last_cpg_signature = None
 
     while True:
         with state_lock:
@@ -628,6 +842,7 @@ def control_loop():
         if desired_mode != active_mode:
             send_mode(ws, desired_mode)
             active_mode = desired_mode
+            last_cpg_signature = None
             print(f"[PY] set ESP mode={active_mode} output={output_mode}")
 
         now = time.time()
@@ -640,12 +855,17 @@ def control_loop():
 
         try:
             if measuring:
+                drain_rtt_acks(ws)
+                sweep_rtt_timeouts()
                 angles = generate_angles(t, dt)
                 send_angle_rtt(ws, angles)
             elif output_mode == "cpg":
                 params = generate_cpg_params(t, dt)
                 params["mode"] = active_mode
-                send_params(ws, params)
+                cpg_signature = json.dumps(params, sort_keys=True, separators=(",", ":"))
+                if cpg_signature != last_cpg_signature:
+                    send_params(ws, params)
+                    last_cpg_signature = cpg_signature
             else:
                 angles = generate_angles(t, dt)
                 send_angle(ws, angles)
@@ -685,6 +905,7 @@ def root():
             "angle_mode_id": state.angle_mode_id,
             "cpg_mode_id": state.cpg_mode_id,
             "gait": current_gait().key,
+            "gait_json_source": current_gait().source_path,
             "measure_enabled": measure_enabled,
             "camera_mode": state.camera_mode,
             "gopro_base_url": state.gopro_base_url,
@@ -754,6 +975,7 @@ def set_cpg_mode(req: ModeIdReq):
 def gaits():
     return {
         "current": current_gait().key,
+        "current_source": current_gait().source_path,
         "gaits": list_gaits(),
     }
 
@@ -763,7 +985,7 @@ def set_gait_endpoint(req: GaitReq):
         set_gait(req.gait)
     except ValueError as e:
         return {"ok": False, "error": str(e)}
-    return {"ok": True, "gait": current_gait().key}
+    return {"ok": True, "gait": current_gait().key, "source": current_gait().source_path}
 
 @app.post("/settings/recorder_url")
 def set_recorder_url(req: RecorderUrlReq):
@@ -906,12 +1128,15 @@ def measure_on():
     global measure_enabled, csv_lines
     measure_enabled = True
     csv_lines = ["seq,rtt_ms,status"]
+    with rtt_lock:
+        rtt_pending.clear()
     return {"ok": True, "measure_enabled": True}
 
 @app.post("/measure_off")
 def measure_off():
     global measure_enabled
     measure_enabled = False
+    sweep_rtt_timeouts()
     path = save_csv()
     return {
         "ok": True,
@@ -925,15 +1150,22 @@ def recording_start():
     global recording_thread
 
     with recording_lock:
+        start_preview_recording = False
         with state_lock:
             if state.recording:
                 return {"ok": True, "recording": True, "path": state.recording_path}
             if state.preview_running:
-                path = new_recording_path()
+                start_preview_recording = True
+
+        if start_preview_recording:
+            clear_servo_status_log()
+            path = new_recording_path(snapshot_recording_gait())
+            with state_lock:
                 state.recording = True
                 state.recording_path = str(path)
                 return {"ok": True, "recording": True, "path": state.recording_path}
 
+        clear_servo_status_log()
         recording_stop_event.clear()
         recording_thread = threading.Thread(target=recording_loop, daemon=True)
         recording_thread.start()

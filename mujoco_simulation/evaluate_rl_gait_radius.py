@@ -180,6 +180,14 @@ def direction_from_signed_radius(signed_radius_m: float | None) -> str:
     return "straight_or_unknown"
 
 
+def direction_from_yaw_rate(yaw_rate_rad_s: float) -> str:
+    if yaw_rate_rad_s > 1e-9:
+        return "left"
+    if yaw_rate_rad_s < -1e-9:
+        return "right"
+    return "straight_or_unknown"
+
+
 def save_plot(path: Path, name: str, xy: np.ndarray, curve: np.ndarray, fit: dict[str, Any], metrics: dict[str, Any]) -> None:
     fig, ax = plt.subplots(figsize=(6.0, 4.2), dpi=170)
     ax.plot(xy[:, 0], xy[:, 1], linewidth=1.2, label="trajectory")
@@ -271,6 +279,7 @@ def evaluate_one(path: Path, args: argparse.Namespace, out_dir: Path) -> dict[st
         "fit_kind": fit["kind"],
         "radius_m": fit["radius"],
         "signed_radius_m": signed_radius_m,
+        "turn_direction": direction_from_yaw_rate(metrics["actual_yaw_rate_rad_s"]),
         "turn_direction_from_rotated_lateral_drift": direction_from_signed_radius(signed_radius_m),
         "fit_rmse_m": fit["rmse"],
         "arc_deg": fit["arc_deg"],
@@ -300,7 +309,7 @@ def main() -> None:
         signed_text = "nan" if signed is None else f"{signed:.4f} m"
         print(
             f"{row['name']}: R={radius_text}, signed_R={signed_text}, "
-            f"direction={row['turn_direction_from_rotated_lateral_drift']}, "
+            f"direction={row['turn_direction']}, "
             f"arc={row['arc_deg']:.2f} deg, rmse={row['fit_rmse_m']:.4f} m, "
             f"csv={row['trajectory_csv']}"
         )
@@ -308,7 +317,8 @@ def main() -> None:
     combined = {
         "description": "RL gait JSON -> MuJoCo trajectory CSV -> fitted trajectory-circle radius R.",
         "radius_definition": "Same fitted trajectory-circle radius concept as plot_fitted_gait_curves.py. MuJoCo coordinates are meters.",
-        "signed_radius_note": "Default sign uses rotated camera-view lateral drift: negative = left, positive = right.",
+        "direction_note": "Turn direction uses actual yaw-rate sign: positive = left, negative = right.",
+        "signed_radius_note": "Legacy signed radius uses rotated camera-view endpoint drift and is not a reliable direction indicator after multiple turns.",
         "count": len(rows),
         "results": rows,
     }

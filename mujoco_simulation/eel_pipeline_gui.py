@@ -112,6 +112,8 @@ class EelPipelineGui:
         self.rl_boundary_y_var = tk.StringVar(value="")
 
         self.gait_json_var = tk.StringVar()
+        self.sim_start_x_var = tk.StringVar(value=f"{DEFAULT_START_X:.3f}")
+        self.sim_start_y_var = tk.StringVar(value=f"{DEFAULT_START_Y:.3f}")
         self.video_var = tk.StringVar()
         self.px_per_m_var = tk.StringVar(value=f"{DEFAULT_PX_PER_M:.6f}")
         self.preview_var = tk.BooleanVar(value=True)
@@ -290,6 +292,18 @@ class EelPipelineGui:
         ttk.Entry(row, textvariable=self.gait_json_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(row, text="Browse", command=self.browse_gait_jsons).pack(side=tk.LEFT, padx=(8, 0))
 
+        start = ttk.LabelFrame(tab, text="Initial position", padding=10)
+        start.pack(fill=tk.X, pady=(8, 4))
+        ttk.Label(start, text="start x (m)").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(start, textvariable=self.sim_start_x_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(start, text="start y (m)").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(start, textvariable=self.sim_start_y_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(
+            start,
+            text="Use a larger x for backward gaits so the eel has room before the left wall.",
+            foreground="#555555",
+        ).grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
+
         buttons = ttk.Frame(tab)
         buttons.pack(fill=tk.X, pady=(8, 0))
         ttk.Button(buttons, text="View first JSON", command=self.view_first_json).pack(side=tk.LEFT)
@@ -364,6 +378,12 @@ class EelPipelineGui:
             return float(text)
         except ValueError as exc:
             raise ValueError(f"{label} must be a number or blank") from exc
+
+    def _sim_start_xy(self) -> tuple[float, float]:
+        try:
+            return float(self.sim_start_x_var.get()), float(self.sim_start_y_var.get())
+        except ValueError as exc:
+            raise ValueError("MuJoCo start x/y must be numbers") from exc
 
     def run_count(self) -> int:
         try:
@@ -775,8 +795,10 @@ class EelPipelineGui:
             fit_out = self.fit_out_dir()
             sim_out.mkdir(parents=True, exist_ok=True)
             fit_out.mkdir(parents=True, exist_ok=True)
+            start_x, start_y = self._sim_start_xy()
             self.logger.write("\n=== Fixed gait curve from exported JSON ===\n")
-            self._run_one_json_gait(output_path, set(), sim_out, fit_out)
+            self.logger.write(f"start_x={start_x:.3f}, start_y={start_y:.3f}\n")
+            self._run_one_json_gait(output_path, set(), sim_out, fit_out, start_x=start_x, start_y=start_y)
         if view:
             self.root.after(0, lambda: self._launch_viewer(output_path))
 
@@ -833,7 +855,12 @@ class EelPipelineGui:
         if not paths:
             messagebox.showerror("Missing JSON", "Please select a gait JSON first.")
             return
-        self._launch_viewer(paths[0])
+        try:
+            start_x, start_y = self._sim_start_xy()
+        except ValueError as exc:
+            messagebox.showerror("Invalid start position", str(exc))
+            return
+        self._launch_viewer(paths[0], start_x=start_x, start_y=start_y)
 
     def view_and_plot_first_json(self) -> None:
         self.view_first_json()
@@ -841,13 +868,22 @@ class EelPipelineGui:
         if paths:
             self._start_thread(self._run_json_gaits, [paths[0]])
 
-    def _launch_viewer(self, gait_path: Path) -> None:
+    def _launch_viewer(self, gait_path: Path, *, start_x: float, start_y: float) -> None:
         gait_path = Path(gait_path).expanduser().resolve()
         if not gait_path.exists():
             messagebox.showerror("Missing JSON", f"Gait JSON not found: {gait_path}")
             return
         self.stop_viewer(silent=True)
-        cmd = [sys.executable, str(SCRIPT_DIR / "view_gait.py"), str(gait_path), "--print-contacts"]
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "view_gait.py"),
+            str(gait_path),
+            "--start-x",
+            str(start_x),
+            "--start-y",
+            str(start_y),
+            "--print-contacts",
+        ]
         self.logger.write("\n=== Launch viewer ===\n")
         self.logger.write("CMD: " + " ".join(cmd) + "\n")
         try:
@@ -919,9 +955,18 @@ class EelPipelineGui:
             return value.item()
         return value
 
-    def _write_json_gait_trajectory_plot(self, png_path: Path, name: str, arr: np.ndarray, summary: dict) -> None:
+    def _write_json_gait_trajectory_plot(
+        self,
+        png_path: Path,
+        name: str,
+        arr: np.ndarray,
+        summary: dict,
+        *,
+        start_x: float,
+        start_y: float,
+    ) -> None:
         fig, ax = plt.subplots(figsize=(7, 5), dpi=170)
-        draw_environment(ax, DEFAULT_START_X, DEFAULT_START_Y)
+        draw_environment(ax, start_x, start_y)
         plot_one(ax, name, arr, summary)
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.25)
@@ -982,23 +1027,34 @@ class EelPipelineGui:
         fit_out = self.fit_out_dir()
         sim_out.mkdir(parents=True, exist_ok=True)
         fit_out.mkdir(parents=True, exist_ok=True)
+        start_x, start_y = self._sim_start_xy()
 
         self.logger.write("\n=== MuJoCo selected JSON gait(s) ===\n")
         self.logger.write(f"count={len(gait_paths)}\n")
+        self.logger.write(f"start_x={start_x:.3f}, start_y={start_y:.3f}\n")
         self.logger.write(f"sim_out={sim_out}\n")
         self.logger.write(f"fit_out={fit_out}\n")
 
         used_names: set[str] = set()
         for gait_path in gait_paths:
-            self._run_one_json_gait(gait_path, used_names, sim_out, fit_out)
+            self._run_one_json_gait(gait_path, used_names, sim_out, fit_out, start_x=start_x, start_y=start_y)
 
-    def _run_one_json_gait(self, gait_path: Path, used_names: set[str], sim_out: Path, fit_out: Path) -> dict:
+    def _run_one_json_gait(
+        self,
+        gait_path: Path,
+        used_names: set[str],
+        sim_out: Path,
+        fit_out: Path,
+        *,
+        start_x: float,
+        start_y: float,
+    ) -> dict:
         gait_path = Path(gait_path).expanduser().resolve()
         if not gait_path.exists():
             raise FileNotFoundError(f"Gait JSON not found: {gait_path}")
 
         self.logger.write(f"\nGait JSON: {gait_path}\n")
-        gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, seconds=30.0, start_x=DEFAULT_START_X, start_y=DEFAULT_START_Y)
+        gait, arr, hit_wall = run_gait(Path(EEL_MODEL_XML), gait_path, seconds=30.0, start_x=start_x, start_y=start_y)
         if arr.size == 0:
             raise RuntimeError(f"No MuJoCo trajectory was produced for {gait_path}")
 
@@ -1008,7 +1064,7 @@ class EelPipelineGui:
 
         summary = summarize(arr, warmup_seconds=0.0)
         trajectory_png = sim_out / f"{name}_trajectory.png"
-        self._write_json_gait_trajectory_plot(trajectory_png, name, arr, summary)
+        self._write_json_gait_trajectory_plot(trajectory_png, name, arr, summary, start_x=start_x, start_y=start_y)
 
         target_info = extract_gait_target_info(gait)
         fixed_summary = {
@@ -1017,6 +1073,8 @@ class EelPipelineGui:
             "source_gait_json": str(gait_path),
             "trajectory_csv": str(csv_path),
             "trajectory_png": str(trajectory_png),
+            "start_x_m": float(start_x),
+            "start_y_m": float(start_y),
             "duration_s": float(arr[-1, 0] - arr[0, 0]) if arr.shape[0] >= 2 else 0.0,
             "hit_wall": bool(hit_wall),
             **target_info,

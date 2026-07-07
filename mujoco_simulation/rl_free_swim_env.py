@@ -40,7 +40,7 @@ class FreeSwimConfig:
     phase_lag_high: float = 0.8
     reward_average_seconds: float = 1.0
     target_speed: float = 0.17
-    speed_tolerance: float = 0.08
+    speed_error_weight: float = 100.0
     energy_weight: float = 0.08
     boundary_x_min: float = RESET_X_MIN
     boundary_x_max: float = RESET_X_MAX
@@ -157,8 +157,8 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
 
         steady_state = self.step_count > self.warmup_steps
         speed_error = avg_vx - self.cfg.target_speed
-        speed_scale = max(float(self.cfg.speed_tolerance), 1e-6)
-        reward_forward = float(np.exp(-((speed_error / speed_scale) ** 2)))
+        speed_error_weight = max(float(self.cfg.speed_error_weight), 0.0)
+        reward_forward = float(-speed_error_weight * (speed_error ** 2))
         reward_energy = -self.cfg.energy_weight * frequency_energy
         reward = 0.0
         if steady_state:
@@ -193,6 +193,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
             "reward_energy": reward_energy,
             "target_speed": float(self.cfg.target_speed),
             "speed_error": float(speed_error),
+            "speed_error_weight": float(speed_error_weight),
         }
         return self._obs(), float(reward), terminated, truncated, info
 

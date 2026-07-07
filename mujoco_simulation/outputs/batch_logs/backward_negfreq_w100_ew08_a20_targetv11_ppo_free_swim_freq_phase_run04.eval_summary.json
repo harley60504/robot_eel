@@ -1,0 +1,15 @@
+{
+  "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run04_eval\\best_model\\best_model.zip",
+  "mean_episode_reward": -33.01523130294349,
+  "mean_vx": -0.11472399131710333,
+  "mean_vy": 8.438286079084886e-05,
+  "mean_abs_y": 0.011346306901283703,
+  "mean_abs_yaw": 0.36560448255690803,
+  "mean_energy_proxy": 1.0,
+  "mean_frequency": -1.0,
+  "mean_phase_lag_1": 0.6870705449581146,
+  "mean_phase_lag_2": 0.7668829094767571,
+  "mean_phase_lag_3": 0.6530271022617817,
+  "mean_phase_lag_4": 0.7023041759431362,
+  "mean_phase_lag_5": 0.662595710515976
+}

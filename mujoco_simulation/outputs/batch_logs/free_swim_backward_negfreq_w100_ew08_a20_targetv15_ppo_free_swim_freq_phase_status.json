@@ -1,0 +1,32 @@
+{
+  "status": "running",
+  "run_idx": 3,
+  "total_runs": 10,
+  "current": {
+    "name": "backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03",
+    "run_idx": 3,
+    "status": "running",
+    "started_at": "2026-06-30 17:38:23",
+    "model_zip": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\zips\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03.zip",
+    "best_model_zip": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval\\best_model\\best_model.zip",
+    "eval_reward_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_reward.csv",
+    "eval_reward_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_reward.png",
+    "eval_debug_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_debug.csv",
+    "eval_best_policy_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\sim_backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_best_policy_fitted_rotated.png",
+    "eval_best_policy_trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_best_policy_trajectory.csv",
+    "eval_best_policy_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\eval_best_policy_curves\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval_best_policy_summary.json",
+    "gait_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\json\\rl_gaits\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03.json",
+    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_policy_rerun_trajectory.csv",
+    "policy_rerun_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\sim_backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_policy_rerun_fitted_rotated.png",
+    "policy_rerun_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\policy_rerun_best_once\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_policy_rerun_summary.json",
+    "trajectory_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fixed_gait_trajectories_mean\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_trajectory.csv",
+    "trajectory_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fixed_gait_trajectories_mean\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_trajectory.png",
+    "trajectory_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fixed_gait_trajectories_mean\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_summary.json",
+    "fitted_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fitted_curve_comparison_mean\\sim_backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_fitted_rotated.png",
+    "fitted_summary": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fitted_curve_comparison_mean\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_fitted_summary.json",
+    "eval_log_dir": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03_eval",
+    "train_log": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\batch_logs\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03.train.log",
+    "eval_summary_json": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\batch_logs\\backward_negfreq_w100_ew08_a20_targetv15_ppo_free_swim_freq_phase_run03.eval_summary.json"
+  },
+  "updated_at": "2026-06-30 17:38:23"
+}

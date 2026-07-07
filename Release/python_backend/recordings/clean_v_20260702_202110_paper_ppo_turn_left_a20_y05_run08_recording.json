@@ -1,0 +1,51 @@
+{
+  "status": "saved",
+  "created_at": "2026-07-02 20:21:10",
+  "updated_at": "2026-07-02 20:22:25",
+  "video_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260702_202110_paper_ppo_turn_left_a20_y05_run08.mp4",
+  "servo_status_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260702_202110_paper_ppo_turn_left_a20_y05_run08_servo_status.csv",
+  "gait_key": "paper_ppo_turn_left_a20_y05_run08",
+  "gait_json_source": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\json\\paper_ppo_turn_left_a20_y05_run08.json",
+  "gait_json_copy": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\recordings\\clean_v_20260702_202110_paper_ppo_turn_left_a20_y05_run08_gait.json",
+  "gait": {
+    "key": "paper_ppo_turn_left_a20_y05_run08",
+    "label": "RL paper_ppo_turn_left_a20_y05_run08",
+    "source_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\Release\\python_backend\\json\\paper_ppo_turn_left_a20_y05_run08.json",
+    "ajoint": 20.0,
+    "frequency": 1.0,
+    "lambda": 1.6275,
+    "L": 1.0,
+    "alpha": 4.0,
+    "k_couple": 0.35,
+    "amp_scales": [
+      1.225,
+      1.075,
+      1.0,
+      1.075,
+      1.15,
+      1.225
+    ],
+    "phase_lags": [
+      0.614439,
+      0.614439,
+      0.614439,
+      0.614439,
+      0.614439
+    ],
+    "joint_bias_deg": [
+      13.675298676958416,
+      16.204749225203884,
+      17.35652789467219,
+      6.366498559298518,
+      5.397975708612321,
+      1.5195793752483964
+    ]
+  },
+  "codec": "mp4v",
+  "fps": 30.0,
+  "width": 848,
+  "height": 480,
+  "camera_mode": "realsense_d435i_color",
+  "recorder_url": "realsense://d435i/color",
+  "output_mode": "cpg"
+}

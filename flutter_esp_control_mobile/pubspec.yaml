@@ -22,8 +22,6 @@ dependencies:
   connectivity_plus: ^7.0.0
 
   # ===== Data / Export =====
-  excel: ^4.0.2
-  path_provider: ^2.1.2
   file_picker: ^8.0.0
   # file_selector: ^1.0.3
 

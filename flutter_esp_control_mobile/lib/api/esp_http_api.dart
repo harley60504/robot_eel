@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../config.dart';
 
@@ -85,6 +86,44 @@ class EspHttpApi {
 
     if (res.statusCode != 200) {
       throw Exception('wifi_delete failed');
+    }
+
+    return res.body.trim() == 'OK';
+  }
+
+  static Future<Uint8List> servoLogCsv() async {
+    final res = await http
+        .get(Uri.parse('$baseUrl/servo_log.csv'))
+        .timeout(const Duration(seconds: 45));
+
+    if (res.statusCode != 200) {
+      throw Exception('servo_log.csv failed');
+    }
+
+    return res.bodyBytes;
+  }
+
+  static Future<int> servoLogStatus() async {
+    final res = await http
+        .get(Uri.parse('$baseUrl/servo_log_status'))
+        .timeout(const Duration(seconds: 5));
+
+    if (res.statusCode != 200) {
+      throw Exception('servo_log_status failed');
+    }
+
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    final samples = data['samples'];
+    return samples is num ? samples.toInt() : 0;
+  }
+
+  static Future<bool> clearServoLog() async {
+    final res = await http
+        .get(Uri.parse('$baseUrl/servo_log_clear'))
+        .timeout(const Duration(milliseconds: 900));
+
+    if (res.statusCode != 200) {
+      throw Exception('servo_log_clear failed');
     }
 
     return res.body.trim() == 'OK';

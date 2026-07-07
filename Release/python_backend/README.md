@@ -5,6 +5,33 @@ This folder is the Python sidecar used by the Flutter desktop app.
 Flutter starts this backend automatically on desktop when the Python page
 `Start` button is pressed and `http://127.0.0.1:8765/` is not already running.
 
+ESP32 camera-board ports:
+
+- HTTP `80`: Wi-Fi API, servo CSV download, and cache clear/status.
+- WebSocket `81`: camera stream.
+- WebSocket `82`: Flutter/manual control commands.
+- WebSocket `83`: Python backend control commands.
+- WebSocket `84`: servo-status telemetry.
+
+The backend sends control JSON to port `83`. Flutter keeps using port `82` for
+manual control, and servo status is received from port `84`, so telemetry does
+not compete with control commands.
+
+Camera-board firmware files are split by interface:
+
+- `CameraStreamWs.*`: camera WebSocket stream.
+- `ControlWsServer.*`: Flutter/Python control WebSockets.
+- `ServoStatusWs.*`: servo telemetry WebSocket and CSV cache.
+- `HttpApi.*`: HTTP routes for Wi-Fi and servo-log download.
+
+UART packet headers are mirrored on both ESP32 boards:
+
+- `ControlParamsPacket.h`: CPG/control-mode parameters, header `0xAA`.
+- `ServoTargetPacket.h`: direct servo target angles, header `0xAB`.
+- `ServoCenterPacket.h`: servo center calibration, optional NVS save, header `0xAC`.
+- `ServoStatusPacket.h`: control-board telemetry back to the camera board, header `0xBB`.
+- `UartPacketChecksum.h`: shared XOR checksum helper for UART packets.
+
 ## Install
 
 ```bat

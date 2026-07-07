@@ -1,0 +1,2 @@
+video_name,direction,commanded_metric,commanded_value,measured_value,error,abs_error,percent_error,measured_radius_m,measured_yaw_rate_abs_rad_s,circle_rmse_m
+clean_v_20260702_225836_symmetric_turn_left_a20_r03_from_right_run09.mp4,left,R_m,0.3,0.3447907222419169,0.044790722241916936,0.044790722241916936,14.930240747305644,0.3447907222419169,0.45197286575618406,0.06739824414099795

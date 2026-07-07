@@ -1,0 +1,16 @@
+{
+  "name": "backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run10",
+  "kind": "line",
+  "radius": null,
+  "rmse": 0.0121111906604883,
+  "arc_deg": 0.0,
+  "duration_s": 29.99900000001368,
+  "path_distance_m": 4.134251231544905,
+  "straight_distance_m": 3.3967432773277824,
+  "mean_speed_m_s": 0.13781296815037233,
+  "forward_displacement_m": -3.3967241995127733,
+  "mean_forward_speed_m_s": -0.11322791424751573,
+  "lateral_drift_m": 0.011384397910941313,
+  "actual_yaw_rate_rad_s": 0.015691802495120692,
+  "fit_png": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\csv_png\\fitted_curve_comparison_mean\\sim_backward_negfreq_w100_ew08_a20_targetv11_ppo_free_swim_freq_phase_run10_fitted_rotated.png"
+}
