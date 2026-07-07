@@ -1,5 +1,0 @@
-mode,direction,target,run_count,group_csv
-yaw,left,0.5,5,mujoco_simulation\outputs\csv_png\paper_reward_summary_preview\paper_reward_yaw_left_0p5.csv
-yaw,right,0.5,5,mujoco_simulation\outputs\csv_png\paper_reward_summary_preview\paper_reward_yaw_right_0p5.csv
-radius,left,0.5,5,mujoco_simulation\outputs\csv_png\paper_reward_summary_preview\paper_reward_radius_left_0p5.csv
-radius,right,0.5,5,mujoco_simulation\outputs\csv_png\paper_reward_summary_preview\paper_reward_radius_right_0p5.csv

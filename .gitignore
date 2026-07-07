@@ -7,6 +7,9 @@ Thumbs.db
 .vscode/
 .idea/
 Release/python_backend/.last_gait.json
+Release/python_backend/recordings/
+recordings/
+real_movie/
 *.mp4
 *.mov
 *.avi
@@ -14,3 +17,24 @@ Release/python_backend/.last_gait.json
 *.wmv
 *.webm
 *.m4v
+
+# Generated output artifacts
+outputs/
+output/
+**/outputs/
+**/output/
+**/outputs.json
+**/output-metadata.json
+**/buildOutputCleanup/
+
+# Flutter/Android build output
+flutter_esp_control_mobile/.dart_tool/
+flutter_esp_control_mobile/build/
+flutter_esp_control_mobile/android/.gradle/
+
+# Real movie analysis outputs; keep root-level analysis code only
+real_movie_analysis/*
+!real_movie_analysis/
+!real_movie_analysis/*.py
+!real_movie_analysis/README.md
+real_movie_analysis_old/

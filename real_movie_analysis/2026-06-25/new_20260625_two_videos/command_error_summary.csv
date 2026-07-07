@@ -1,2 +1,0 @@
-video_name,direction,commanded_metric,commanded_value,measured_value,error,abs_error,percent_error,measured_radius_m,measured_yaw_rate_abs_rad_s,circle_rmse_m
-left_r03_run09.mp4,left,R_m,0.3,0.35739234607738174,0.05739234607738175,0.05739234607738175,19.130782025793916,0.35739234607738174,0.4755042903206696,0.041278213631648

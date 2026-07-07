@@ -1,6 +1,0 @@
-﻿"category","count","path"
-"individual_rewards","40","C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\paper_ppo_40_extracted_figures\individual_rewards"
-"fixed_gait_trajectories_after_mean","40","C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\paper_ppo_40_extracted_figures\fixed_gait_trajectories_after_mean"
-"training_eval_best_policy_curves","40","C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\paper_ppo_40_extracted_figures\training_eval_best_policy_curves"
-"policy_rerun_before_fixed_mean","40","C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\paper_ppo_40_extracted_figures\policy_rerun_before_fixed_mean"
-"fixed_gait_fitted_rotated_after_mean","40","C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation\outputs\paper_ppo_40_extracted_figures\fixed_gait_fitted_rotated_after_mean"

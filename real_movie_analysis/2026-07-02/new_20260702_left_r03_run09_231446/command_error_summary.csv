@@ -1,2 +1,0 @@
-video_name,direction,commanded_metric,commanded_value,measured_value,error,abs_error,percent_error,measured_radius_m,measured_yaw_rate_abs_rad_s,circle_rmse_m
-clean_v_20260702_231446_paper80_ppo_turn_left_a20_r03_run09.mp4,left,R_m,0.3,0.37205222035016267,0.07205222035016268,0.07205222035016268,24.01740678338756,0.37205222035016267,0.42296698765100066,0.0613027944554914
