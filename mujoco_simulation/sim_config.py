@@ -8,12 +8,12 @@ EEL_MODEL_XML = str(ROOT / "eel.xml")
 RECTANGLE_MODEL_XML = str(ROOT / "eel.xml")
 TETHERED_MODEL_XML = str(ROOT / "eel_tethered.xml")
 
-TANK_X_MIN = 0.0
-TANK_X_MAX = 3.0
-TANK_CENTER_X = 1.5
-TANK_Y_HALF = 0.75
+TANK_X_MIN = -10.0
+TANK_X_MAX = 10.0
+TANK_CENTER_X = 0.0
+TANK_Y_HALF = 10.0
 
-DEFAULT_START_X = 0.60
+DEFAULT_START_X = 0.0
 DEFAULT_START_Y = 0.0
 
 # Keep the rectangle path away from the top/bottom walls. The eel body swings in y
@@ -29,6 +29,6 @@ RECTANGLE_PATH_CENTER_Y = 0.0
 # Rectangle mode now uses the same eel.xml body, so this preserves old steering behavior.
 RECTANGLE_CONTROL_SIGN = -1.0
 
-RESET_X_MIN = -0.225
-RESET_X_MAX = 3.225
-RESET_Y = 0.90
+RESET_X_MIN = -10.0
+RESET_X_MAX = 10.0
+RESET_Y = 10.0

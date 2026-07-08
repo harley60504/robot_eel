@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import csv
 import math
 import os
 import shutil
@@ -15,7 +16,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from hopf_cpg import DEFAULT_AJOINT_DEG, degrees_to_radians
-from make_tracked_center_cleaned_physical import DEFAULT_PREVIEW_NAME, DEFAULT_PX_PER_M, process_video
 from plot_fixed_gait_trajectories import draw_environment, extract_gait_target_info, plot_one, run_gait, summarize
 from plot_fitted_gait_curves import (
     add_fitted_radius_metrics,
@@ -31,10 +31,18 @@ from rl_turning_env import TurningConfig
 from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML
 from plot_turning_policy_rollout_curves import write_rollout_outputs
 from policy_rerun_fixed_gait import write_mean_fixed_gait_from_best_policy
+from rl_free_swim_env import FreeSwimConfig
+import run_free_swim_paper_10 as free_swim_batch
+from run_free_swim_paper_10 import (
+    rollout_policy_with_actions as rollout_free_swim_policy_with_actions,
+    write_fixed_gait_fitted as write_free_swim_fixed_gait_fitted,
+    write_fixed_gait_trajectory as write_free_swim_fixed_gait_trajectory,
+    write_mean_gait_json as write_free_swim_mean_gait_json,
+    write_policy_rerun_outputs as write_free_swim_policy_rerun_outputs,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-REAL_SUBDIR = "real_video_analysis"
 SIM_SUBDIR = "fixed_gait_trajectories_mean"
 FIT_SUBDIR = "fitted_curve_comparison_mean"
 POLICY_ROLLOUT_SUBDIR = "policy_rerun_best_once"
@@ -70,10 +78,19 @@ def safe_name(value: str) -> str:
     return safe.strip("._") or "robot_eel_output"
 
 
+def model_zip_path(path: Path) -> Path:
+    path = Path(path)
+    return path if path.name.lower().endswith(".zip") else Path(f"{path}.zip")
+
+
+def model_save_path(path: Path) -> Path:
+    return model_zip_path(path)
+
+
 class EelPipelineGui:
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("Robot Eel RL / MuJoCo / Real Video Pipeline")
+        self.root.title("Robot Eel RL Train / View")
         self.root.geometry("1120x780")
         self.root.minsize(980, 680)
 
@@ -83,6 +100,12 @@ class EelPipelineGui:
 
         self.out_var = tk.StringVar(value=str(DEFAULT_PIPELINE_ROOT))
 
+        self.rl_train_mode_var = tk.StringVar(value="straight")
+        self.rl_target_speed_var = tk.StringVar(value="0.17")
+        self.rl_frequency_low_var = tk.StringVar(value="1.0")
+        self.rl_frequency_high_var = tk.StringVar(value="1.2")
+        self.rl_phase_lag_low_var = tk.StringVar(value="0.5")
+        self.rl_phase_lag_high_var = tk.StringVar(value="0.8")
         self.rl_model_var = tk.StringVar()
         self.rl_output_json_var = tk.StringVar(value=str(RL_GAIT_DIR / "rl_turn_right_preview.json"))
         self.rl_turn_direction_var = tk.StringVar(value="right")
@@ -92,20 +115,20 @@ class EelPipelineGui:
         self.rl_use_radius_reward_var = tk.BooleanVar(value=True)
         self.rl_yaw_reward_weight_var = tk.StringVar(value="1.20")
         self.rl_radius_reward_weight_var = tk.StringVar(value="1.20")
-        self.rl_run_name_var = tk.StringVar(value="ppo_turn_right_gui")
+        self.rl_run_name_var = tk.StringVar(value="eel_train_gui")
         self.rl_run_count_var = tk.StringVar(value="1")
         self.rl_strategy_var = tk.StringVar(value="policy-rerun-mean")
         self.rl_samples_var = tk.StringVar(value="300")
         self.rl_max_episodes_var = tk.StringVar(value="20")
         self.rl_train_timesteps_var = tk.StringVar(value="200000")
-        self.rl_train_output_var = tk.StringVar(value=str(ZIP_DIR / "ppo_turn_right_gui"))
+        self.rl_train_output_var = tk.StringVar(value=str(ZIP_DIR / "eel_train_gui.zip"))
         self.rl_load_model_var = tk.StringVar(value="")
-        self.rl_eval_freq_var = tk.StringVar(value="10000")
+        self.rl_eval_freq_var = tk.StringVar(value="5000")
         self.rl_freq_var = tk.StringVar(value="")
         self.rl_wavelength_var = tk.StringVar(value="")
         self.rl_ajoint_var = tk.StringVar(value="")
-        self.rl_bias_low_var = tk.StringVar(value="")
-        self.rl_bias_high_var = tk.StringVar(value="")
+        self.rl_bias_low_var = tk.StringVar(value="-0.35")
+        self.rl_bias_high_var = tk.StringVar(value="0.35")
         self.rl_reward_average_seconds_var = tk.StringVar(value="")
         self.rl_boundary_x_min_var = tk.StringVar(value="")
         self.rl_boundary_x_max_var = tk.StringVar(value="")
@@ -114,47 +137,78 @@ class EelPipelineGui:
         self.gait_json_var = tk.StringVar()
         self.sim_start_x_var = tk.StringVar(value=f"{DEFAULT_START_X:.3f}")
         self.sim_start_y_var = tk.StringVar(value=f"{DEFAULT_START_Y:.3f}")
-        self.video_var = tk.StringVar()
-        self.px_per_m_var = tk.StringVar(value=f"{DEFAULT_PX_PER_M:.6f}")
-        self.preview_var = tk.BooleanVar(value=True)
-        self.near_wall_note_var = tk.StringVar(value="Real MP4 near-wall plot currently uses the processed/cleaned tracked segment from the video tracker.")
+        self.view_mode_var = tk.StringVar(value="return_policy")
+        self.view_model_var = tk.StringVar()
+        self.view_gait_var = tk.StringVar()
+        self.view_summary_var = tk.StringVar()
 
-        for path in (ZIP_DIR, CSV_PNG_DIR, RL_GAIT_DIR):
+        for path in (ZIP_DIR, RL_GAIT_DIR):
             path.mkdir(parents=True, exist_ok=True)
 
         self._build_layout()
-        self.logger.write("Robot eel unified pipeline GUI ready.\n")
-        self.logger.write("Use the RL tab to export PPO zip to gait JSON, view it, and plot the trajectory until wall contact.\n")
-        self.logger.write("Use the Real MP4 tab to process videos and the Compare tab for fitted real-vs-sim curves.\n")
+        self.logger.write("Robot eel training GUI ready.\n")
+        self.logger.write("Choose straight speed training or turning yaw/radius training, then run one or more PPO jobs.\n")
 
     def _build_layout(self) -> None:
         outer = ttk.Frame(self.root, padding=12)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        output_row = ttk.Frame(outer)
+        paned = ttk.PanedWindow(outer, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True)
+
+        left_pane = ttk.Frame(paned)
+        right_pane = ttk.Frame(paned)
+        paned.add(left_pane, weight=3)
+        paned.add(right_pane, weight=2)
+
+        output_row = ttk.Frame(left_pane)
         output_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(output_row, text="Output root").pack(side=tk.LEFT, padx=(0, 8))
         ttk.Entry(output_row, textvariable=self.out_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
         ttk.Button(output_row, text="Browse", command=self.browse_output).pack(side=tk.LEFT, padx=(8, 0))
         ttk.Button(output_row, text="Open", command=self.open_output_folder).pack(side=tk.LEFT, padx=(6, 0))
-        ttk.Button(output_row, text="Stop Viewer", command=self.stop_viewer).pack(side=tk.LEFT, padx=(6, 0))
 
-        self.notebook = ttk.Notebook(outer)
-        self.notebook.pack(fill=tk.BOTH, expand=False)
-        self._build_train_tab()
-        self._build_export_tab()
-        self._build_sim_tab()
-        self._build_real_tab()
-        self._build_compare_tab()
+        control_canvas = tk.Canvas(left_pane, highlightthickness=0)
+        control_scrollbar = ttk.Scrollbar(left_pane, orient=tk.VERTICAL, command=control_canvas.yview)
+        control_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        control_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        control_canvas.configure(yscrollcommand=control_scrollbar.set)
 
-        log_frame = ttk.LabelFrame(outer, text="Log", padding=8)
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-        self.log = tk.Text(log_frame, height=18, wrap=tk.WORD, font=("Consolas", 10))
+        controls = ttk.Frame(control_canvas)
+        controls_window = control_canvas.create_window((0, 0), window=controls, anchor=tk.NW)
+
+        def _update_scroll_region(_event=None) -> None:
+            control_canvas.configure(scrollregion=control_canvas.bbox("all"))
+
+        def _fit_controls_width(event) -> None:
+            control_canvas.itemconfigure(controls_window, width=event.width)
+
+        controls.bind("<Configure>", _update_scroll_region)
+        control_canvas.bind("<Configure>", _fit_controls_width)
+        control_canvas.bind_all("<MouseWheel>", lambda event: control_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units"))
+
+        self._build_train_tab(controls)
+
+        log_frame = ttk.LabelFrame(right_pane, text="Log", padding=8)
+        log_frame.pack(fill=tk.BOTH, expand=True)
+        self.log = tk.Text(log_frame, width=56, wrap=tk.WORD, font=("Consolas", 10))
         self.log.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log.configure(yscrollcommand=scrollbar.set, state=tk.DISABLED)
         self.logger = TextLogger(self.log)
+
+    def _build_mode_frame(self, parent: ttk.Frame) -> None:
+        options = ttk.LabelFrame(parent, text="Train mode", padding=10)
+        options.pack(fill=tk.X, pady=(8, 4))
+        ttk.Radiobutton(options, text="Straight speed", variable=self.rl_train_mode_var, value="straight").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Radiobutton(options, text="Turning yaw/radius", variable=self.rl_train_mode_var, value="turning").grid(row=0, column=1, sticky=tk.W, padx=16, pady=4)
+
+    def _build_straight_target_frame(self, parent: ttk.Frame) -> None:
+        options = ttk.LabelFrame(parent, text="Straight speed target", padding=10)
+        options.pack(fill=tk.X, pady=(8, 4))
+        ttk.Label(options, text="Target speed m/s (+forward, -backward)").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(options, textvariable=self.rl_target_speed_var, width=12).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
 
     def _build_turning_target_frame(self, parent: ttk.Frame) -> None:
         options = ttk.LabelFrame(parent, text="Turning target", padding=10)
@@ -163,66 +217,50 @@ class EelPipelineGui:
         ttk.Combobox(options, textvariable=self.rl_turn_direction_var, values=("left", "right"), state="readonly", width=8).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
         ttk.Label(options, text="Target yaw rate |rad/s|").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
         ttk.Entry(options, textvariable=self.rl_target_yaw_rate_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(options, text="Target radius m (blank = none)").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Label(options, text="Target radius m").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
         ttk.Entry(options, textvariable=self.rl_target_radius_var, width=10).grid(row=0, column=5, sticky=tk.W, padx=4, pady=4)
-        ttk.Checkbutton(options, text="Reward yaw_rate", variable=self.rl_use_yaw_reward_var).grid(row=1, column=0, columnspan=2, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(options, text="yaw weight").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(options, textvariable=self.rl_yaw_reward_weight_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Checkbutton(options, text="Reward R", variable=self.rl_use_radius_reward_var).grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(options, textvariable=self.rl_radius_reward_weight_var, width=10).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(options, text="Yaw weight").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(options, textvariable=self.rl_yaw_reward_weight_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(options, text="Radius weight").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(options, textvariable=self.rl_radius_reward_weight_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
 
-    def _build_export_options_frame(self, parent: ttk.Frame) -> None:
-        export = ttk.LabelFrame(parent, text="Export options", padding=10)
-        export.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(export, text="Name").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(export, textvariable=self.rl_run_name_var, width=22).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Runs").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(export, textvariable=self.rl_run_count_var, width=8).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Strategy").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Combobox(
-            export,
-            textvariable=self.rl_strategy_var,
-            values=("policy-rerun-mean",),
-            state="readonly",
-            width=18,
-        ).grid(row=0, column=5, sticky=tk.W, padx=4, pady=4)
-        ttk.Button(export, text="Auto name", command=self.auto_rl_output_name).grid(row=0, column=6, sticky=tk.W, padx=4, pady=4)
-
-        ttk.Label(export, text="Output gait JSON").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(export, textvariable=self.rl_output_json_var).grid(row=1, column=1, columnspan=5, sticky=tk.EW, padx=4, pady=4)
-        ttk.Button(export, text="Browse", command=self.browse_rl_output).grid(row=1, column=6, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="Fixed gait source").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(export, text="eval best policy rerun mean").grid(
-            row=2, column=1, columnspan=3, sticky=tk.W, padx=4, pady=4
-        )
-        export.columnconfigure(5, weight=1)
+    def _build_run_options_frame(self, parent: ttk.Frame) -> None:
+        run = ttk.LabelFrame(parent, text="Run output", padding=10)
+        run.pack(fill=tk.X, pady=(8, 4))
+        ttk.Label(run, text="File name").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(run, textvariable=self.rl_run_name_var, width=26).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(run, text="Runs").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(run, textvariable=self.rl_run_count_var, width=8).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Button(run, text="Auto name", command=self.auto_rl_output_name).grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
+        ttk.Label(run, text="Output model base").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(run, textvariable=self.rl_train_output_var).grid(row=1, column=1, columnspan=3, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(run, text="Browse", command=self.browse_rl_train_output).grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
+        run.columnconfigure(3, weight=1)
 
     def _build_env_override_frame(self, parent: ttk.Frame) -> None:
-        advanced = ttk.LabelFrame(parent, text="Optional env overrides; leave blank to match TurningConfig defaults", padding=10)
+        advanced = ttk.LabelFrame(parent, text="Bounds and shared training parameters", padding=10)
         advanced.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(advanced, text="freq").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_freq_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="wavelength").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_wavelength_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="ajoint deg").grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_ajoint_var, width=10).grid(row=0, column=5, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="bias low").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_bias_low_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="bias high").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_bias_high_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="avg seconds").grid(row=1, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_reward_average_seconds_var, width=10).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="boundary x min").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_boundary_x_min_var, width=10).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="boundary x max").grid(row=2, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_boundary_x_max_var, width=10).grid(row=2, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(advanced, text="boundary y").grid(row=2, column=4, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(advanced, textvariable=self.rl_boundary_y_var, width=10).grid(row=2, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Straight freq low").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_frequency_low_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Straight freq high").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_frequency_high_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Straight phase_lag low").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_phase_lag_low_var, width=10).grid(row=1, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Straight phase_lag high").grid(row=1, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_phase_lag_high_var, width=10).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Turning bias low").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_bias_low_var, width=10).grid(row=2, column=1, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Turning bias high").grid(row=2, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_bias_high_var, width=10).grid(row=2, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(advanced, text="Reward avg seconds").grid(row=3, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(advanced, textvariable=self.rl_reward_average_seconds_var, width=10).grid(row=3, column=1, sticky=tk.W, padx=4, pady=4)
 
-    def _build_train_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Train RL Turning")
+    def _build_train_tab(self, parent: ttk.Frame) -> None:
+        tab = ttk.Frame(parent, padding=10)
+        tab.pack(fill=tk.X, expand=False)
 
+        self._build_mode_frame(tab)
+        self._build_straight_target_frame(tab)
         self._build_turning_target_frame(tab)
 
         train = ttk.LabelFrame(tab, text="Train PPO directly from GUI", padding=10)
@@ -231,136 +269,38 @@ class EelPipelineGui:
         ttk.Entry(train, textvariable=self.rl_train_timesteps_var, width=12).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
         ttk.Label(train, text="Eval freq").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
         ttk.Entry(train, textvariable=self.rl_eval_freq_var, width=12).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(train, text="Output model base").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(train, textvariable=self.rl_train_output_var).grid(row=1, column=1, columnspan=4, sticky=tk.EW, padx=4, pady=4)
-        ttk.Button(train, text="Browse", command=self.browse_rl_train_output).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(train, text="Load model zip (optional)").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(train, textvariable=self.rl_load_model_var).grid(row=2, column=1, columnspan=4, sticky=tk.EW, padx=4, pady=4)
-        ttk.Button(train, text="Browse", command=self.browse_rl_load_model).grid(row=2, column=5, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(train, text="Load model zip (optional)").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(train, textvariable=self.rl_load_model_var).grid(row=1, column=1, columnspan=4, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(train, text="Browse", command=self.browse_rl_load_model).grid(row=1, column=5, sticky=tk.W, padx=4, pady=4)
         train.columnconfigure(4, weight=1)
 
         self._build_env_override_frame(tab)
-        self._build_export_options_frame(tab)
+        self._build_run_options_frame(tab)
 
         buttons = ttk.Frame(tab)
         buttons.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(buttons, text="Train RL", command=lambda: self.start_rl_train(export=False, view=False, plot=False)).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Train + Export + View", command=lambda: self.start_rl_train(export=True, view=True, plot=False)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Train + Export + Plot", command=lambda: self.start_rl_train(export=True, view=False, plot=True)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Train + Export + View + Plot", command=lambda: self.start_rl_train(export=True, view=True, plot=True)).pack(side=tk.LEFT, padx=6)
+        ttk.Button(buttons, text="Train", command=lambda: self.start_rl_train(export=False, view=False, plot=False)).pack(side=tk.LEFT)
 
-        ttk.Label(
-            tab,
-            text="This tab creates a new PPO .zip first. The optional export fields are only used by the Train + Export buttons.",
-            foreground="#555555",
-        ).pack(anchor=tk.W, pady=(8, 0))
+        self._build_view_frame(tab)
 
-    def _build_export_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Export PPO Model")
+    def _build_view_frame(self, parent: ttk.Frame) -> None:
+        view = ttk.LabelFrame(parent, text="View trained result", padding=10)
+        view.pack(fill=tk.X, pady=(10, 4))
+        ttk.Radiobutton(view, text="Return policy", variable=self.view_mode_var, value="return_policy").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Radiobutton(view, text="Fixed gait", variable=self.view_mode_var, value="fixed_gait").grid(row=0, column=1, sticky=tk.W, padx=16, pady=4)
+        ttk.Button(view, text="View", command=self.view_selected_result).grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
+        ttk.Button(view, text="Stop View", command=self.stop_viewer).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
 
-        row = ttk.Frame(tab)
-        row.pack(fill=tk.X, pady=4)
-        ttk.Label(row, text="PPO model zip", width=16).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.rl_model_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse", command=self.browse_rl_model).pack(side=tk.LEFT, padx=(8, 0))
-
-        self._build_turning_target_frame(tab)
-        self._build_env_override_frame(tab)
-        self._build_export_options_frame(tab)
-
-        export_buttons = ttk.Frame(tab)
-        export_buttons.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(export_buttons, text="Export JSON", command=lambda: self.start_rl_export(view=False, plot=False)).pack(side=tk.LEFT)
-        ttk.Button(export_buttons, text="Export + View", command=lambda: self.start_rl_export(view=True, plot=False)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(export_buttons, text="Export + Plot Trajectory", command=lambda: self.start_rl_export(view=False, plot=True)).pack(side=tk.LEFT, padx=6)
-        ttk.Button(export_buttons, text="Export + View + Plot", command=lambda: self.start_rl_export(view=True, plot=True)).pack(side=tk.LEFT, padx=6)
-
-        note = (
-            "Use this tab when a PPO .zip already exists. Bias-only policies export joint_bias from the PPO action; "
-            "amp_scales and phase_lags come from the fixed TurningConfig wave."
-        )
-        ttk.Label(tab, text=note, foreground="#555555").pack(anchor=tk.W, pady=(8, 0))
-
-    def _build_sim_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="MuJoCo JSON Gait")
-
-        row = ttk.Frame(tab)
-        row.pack(fill=tk.X, pady=4)
-        ttk.Label(row, text="Gait JSON file(s)", width=16).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.gait_json_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse", command=self.browse_gait_jsons).pack(side=tk.LEFT, padx=(8, 0))
-
-        start = ttk.LabelFrame(tab, text="Initial position", padding=10)
-        start.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(start, text="start x (m)").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(start, textvariable=self.sim_start_x_var, width=10).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(start, text="start y (m)").grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Entry(start, textvariable=self.sim_start_y_var, width=10).grid(row=0, column=3, sticky=tk.W, padx=4, pady=4)
-        ttk.Label(
-            start,
-            text="Use a larger x for backward gaits so the eel has room before the left wall.",
-            foreground="#555555",
-        ).grid(row=0, column=4, sticky=tk.W, padx=12, pady=4)
-
-        buttons = ttk.Frame(tab)
-        buttons.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(buttons, text="View first JSON", command=self.view_first_json).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Plot selected JSON gait(s)", command=self.start_jsons).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="View + Plot first JSON", command=self.view_and_plot_first_json).pack(side=tk.LEFT, padx=6)
-
-        ttk.Label(
-            tab,
-            text="Simulation plots stop at wall contact and save generated files under mujoco_simulation/outputs.",
-            foreground="#555555",
-        ).pack(anchor=tk.W, pady=(8, 0))
-
-    def _build_real_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Real MP4 Tracking")
-
-        row = ttk.Frame(tab)
-        row.pack(fill=tk.X, pady=4)
-        ttk.Label(row, text="MP4 file(s)", width=16).pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.video_var).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(row, text="Browse", command=self.browse_videos).pack(side=tk.LEFT, padx=(8, 0))
-
-        options = ttk.LabelFrame(tab, text="Tracking options", padding=10)
-        options.pack(fill=tk.X, pady=(8, 4))
-        ttk.Label(options, text="px_per_m").grid(row=0, column=0, sticky=tk.W, padx=4, pady=4)
-        ttk.Entry(options, textvariable=self.px_per_m_var, width=14).grid(row=0, column=1, sticky=tk.W, padx=4, pady=4)
-        ttk.Checkbutton(options, text=f"Write preview PNG ({DEFAULT_PREVIEW_NAME})", variable=self.preview_var).grid(row=0, column=2, sticky=tk.W, padx=12, pady=4)
-        ttk.Label(options, textvariable=self.near_wall_note_var, foreground="#555555").grid(row=1, column=0, columnspan=3, sticky=tk.W, padx=4, pady=4)
-
-        buttons = ttk.Frame(tab)
-        buttons.pack(fill=tk.X, pady=(8, 0))
-        ttk.Button(buttons, text="Analyze selected MP4(s)", command=self.start_mp4s).pack(side=tk.LEFT)
-
-    def _build_compare_tab(self) -> None:
-        tab = ttk.Frame(self.notebook, padding=10)
-        self.notebook.add(tab, text="Compare / Outputs")
-
-        ttk.Label(
-            tab,
-            text="Run this after real MP4 tracking and/or MuJoCo JSON trajectory plotting. It reads current output folders and writes fitted curve comparisons.",
-            foreground="#555555",
-        ).pack(anchor=tk.W, pady=(0, 8))
-
-        buttons = ttk.Frame(tab)
-        buttons.pack(fill=tk.X, pady=4)
-        ttk.Button(buttons, text="Run selected MP4(s) + JSON gait(s)", command=self.start_selected_pipeline).pack(side=tk.LEFT)
-        ttk.Button(buttons, text="Plot fitted curves from current outputs", command=self.start_curves).pack(side=tk.LEFT, padx=6)
-        ttk.Button(buttons, text="Open output root", command=self.open_output_folder).pack(side=tk.LEFT, padx=6)
-
-        folders = (
-            "Output folders:\n"
-            "  outputs/csv_png/ for CSV/PNG and fitted-curve outputs\n"
-            "  outputs/zips/ for PPO .zip models\n"
-            "  outputs/json/rl_gaits/ for exported PPO gait JSONs\n"
-            f"  outputs/{REAL_SUBDIR}/ for real-video tracking"
-        )
-        ttk.Label(tab, text=folders).pack(anchor=tk.W, pady=(10, 0))
+        ttk.Label(view, text="Return policy .zip").grid(row=1, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(view, textvariable=self.view_model_var).grid(row=1, column=1, columnspan=2, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(view, text="Browse", command=self.browse_view_model).grid(row=1, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(view, text="Policy summary JSON").grid(row=2, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(view, textvariable=self.view_summary_var).grid(row=2, column=1, columnspan=2, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(view, text="Browse", command=self.browse_view_summary).grid(row=2, column=3, sticky=tk.W, padx=4, pady=4)
+        ttk.Label(view, text="Fixed gait JSON").grid(row=3, column=0, sticky=tk.W, padx=4, pady=4)
+        ttk.Entry(view, textvariable=self.view_gait_var).grid(row=3, column=1, columnspan=2, sticky=tk.EW, padx=4, pady=4)
+        ttk.Button(view, text="Browse", command=self.browse_view_gait).grid(row=3, column=3, sticky=tk.W, padx=4, pady=4)
+        view.columnconfigure(2, weight=1)
 
     @staticmethod
     def _join_paths(paths: tuple[str, ...] | list[str]) -> str:
@@ -440,11 +380,10 @@ class EelPipelineGui:
             filetypes=(("Stable-Baselines model base", "*"), ("Zip files", "*.zip"), ("All files", "*.*")),
         )
         if filename:
-            # train_turning_rl.py accepts the base path; Stable-Baselines writes .zip.
-            if filename.lower().endswith(".zip"):
-                filename = filename[:-4]
+            if not filename.lower().endswith(".zip"):
+                filename = f"{filename}.zip"
             self.rl_train_output_var.set(filename)
-            self.rl_run_name_var.set(safe_name(Path(filename).stem))
+            self.rl_run_name_var.set(safe_name(Path(filename).name.removesuffix(".zip")))
 
     def browse_rl_load_model(self) -> None:
         filename = filedialog.askopenfilename(
@@ -455,42 +394,47 @@ class EelPipelineGui:
         if filename:
             self.rl_load_model_var.set(filename)
 
-    def browse_gait_jsons(self) -> None:
-        filenames = filedialog.askopenfilenames(
-            title="Select gait JSON file(s)",
+    def browse_view_model(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Select return policy PPO model zip",
+            initialdir=str(ZIP_DIR),
+            filetypes=(("PPO zip", "*.zip"), ("All files", "*.*")),
+        )
+        if filename:
+            self.view_model_var.set(filename)
+
+    def browse_view_summary(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Select policy summary JSON",
+            initialdir=str(OUTPUTS_DIR),
             filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
         )
-        if filenames:
-            self.gait_json_var.set(self._join_paths(list(filenames)))
+        if filename:
+            self.view_summary_var.set(filename)
 
-    def browse_videos(self) -> None:
-        filenames = filedialog.askopenfilenames(
-            title="Select MP4 video file(s)",
-            filetypes=(("MP4 files", "*.mp4"), ("Video files", "*.mp4 *.avi *.mov *.mkv"), ("All files", "*.*")),
+    def browse_view_gait(self) -> None:
+        filename = filedialog.askopenfilename(
+            title="Select fixed gait JSON",
+            initialdir=str(RL_GAIT_DIR),
+            filetypes=(("JSON files", "*.json"), ("All files", "*.*")),
         )
-        if filenames:
-            self.video_var.set(self._join_paths(list(filenames)))
+        if filename:
+            self.view_gait_var.set(filename)
 
     def output_root(self) -> Path:
         return resolve_gui_path(Path(self.out_var.get()))
 
-    def real_out_dir(self) -> Path:
-        return self.output_root() / REAL_SUBDIR
+    def sim_out_dir(self, run_name: str | None = None) -> Path:
+        return CSV_PNG_DIR / SIM_SUBDIR if run_name is None else self.organized_run_dir(run_name) / "06_fixed_gait_trajectory"
 
-    def sim_out_dir(self) -> Path:
-        return CSV_PNG_DIR / SIM_SUBDIR
+    def fit_out_dir(self, run_name: str | None = None) -> Path:
+        return CSV_PNG_DIR / FIT_SUBDIR if run_name is None else self.organized_run_dir(run_name) / "07_fixed_gait_fitted"
 
-    def fit_out_dir(self) -> Path:
-        return CSV_PNG_DIR / FIT_SUBDIR
+    def policy_rollout_out_dir(self, run_name: str | None = None) -> Path:
+        return CSV_PNG_DIR / POLICY_ROLLOUT_SUBDIR if run_name is None else self.organized_run_dir(run_name) / "04_policy_rerun_mean"
 
-    def policy_rollout_out_dir(self) -> Path:
-        return CSV_PNG_DIR / POLICY_ROLLOUT_SUBDIR
-
-    def eval_best_policy_out_dir(self) -> Path:
-        return CSV_PNG_DIR / "eval_best_policy_curves"
-
-    def selected_videos(self) -> list[Path]:
-        return [resolve_gui_path(path) for path in self._paths_from_var(self.video_var.get())]
+    def eval_best_policy_out_dir(self, run_name: str | None = None) -> Path:
+        return CSV_PNG_DIR / "eval_best_policy_curves" if run_name is None else self.organized_run_dir(run_name) / "03_return_policy_trajectory"
 
     def selected_gait_jsons(self) -> list[Path]:
         return [resolve_gui_path(path) for path in self._paths_from_var(self.gait_json_var.get())]
@@ -509,21 +453,18 @@ class EelPipelineGui:
             messagebox.showerror("Open folder failed", str(exc))
 
     def auto_rl_output_name(self) -> None:
-        model_text = self.rl_model_var.get().strip()
-        model_stem = Path(model_text).stem if model_text else "ppo_turning_policy"
-        direction = self.rl_turn_direction_var.get().strip() or "turn"
-        yaw = safe_name(self.rl_target_yaw_rate_var.get().strip().replace(".", "p") or "yaw")
-        radius = self.rl_target_radius_var.get().strip()
-        radius_part = f"_r{safe_name(radius.replace('.', 'p'))}" if radius else ""
-        reward_parts = []
-        if self.rl_use_yaw_reward_var.get():
-            reward_parts.append("yaw")
-        if self.rl_use_radius_reward_var.get():
-            reward_parts.append("r")
-        reward_part = "_reward_" + "_".join(reward_parts) if reward_parts else "_reward_none"
-        name = safe_name(f"{model_stem}_{direction}_yaw{yaw}{radius_part}{reward_part}_{self.rl_strategy_var.get()}")
+        mode = self.rl_train_mode_var.get()
+        if mode == "straight":
+            speed = safe_name(self.rl_target_speed_var.get().strip().replace("-", "neg") or "speed")
+            name = safe_name(f"straight_speed_{speed}")
+        else:
+            direction = self.rl_turn_direction_var.get().strip() or "turn"
+            yaw = safe_name(self.rl_target_yaw_rate_var.get().strip() or "yaw")
+            radius = self.rl_target_radius_var.get().strip()
+            radius_part = f"_r{safe_name(radius)}" if radius else ""
+            name = safe_name(f"turn_{direction}_yaw{yaw}{radius_part}")
         self.rl_run_name_var.set(name)
-        self.rl_train_output_var.set(str(ZIP_DIR / name))
+        self.rl_train_output_var.set(str(ZIP_DIR / f"{name}.zip"))
         self.rl_output_json_var.set(str(RL_GAIT_DIR / f"{name}.json"))
 
     def make_turning_config_from_gui(self) -> TurningConfig:
@@ -579,6 +520,137 @@ class EelPipelineGui:
             raise ValueError("boundary x min must be less than boundary x max")
         return cfg
 
+    def make_free_swim_config_from_gui(self) -> FreeSwimConfig:
+        cfg = FreeSwimConfig()
+        cfg.target_speed = float(self.rl_target_speed_var.get())
+        cfg.frequency_low = float(self.rl_frequency_low_var.get())
+        cfg.frequency_high = float(self.rl_frequency_high_var.get())
+        cfg.phase_lag_low = float(self.rl_phase_lag_low_var.get())
+        cfg.phase_lag_high = float(self.rl_phase_lag_high_var.get())
+        if cfg.frequency_low > cfg.frequency_high:
+            raise ValueError("Straight freq low cannot be greater than freq high")
+        if cfg.phase_lag_low > cfg.phase_lag_high:
+            raise ValueError("Straight phase_lag low cannot be greater than phase_lag high")
+        avg_seconds = self._parse_optional_float(self.rl_reward_average_seconds_var.get(), "avg seconds")
+        if avg_seconds is not None:
+            cfg.reward_average_seconds = avg_seconds
+        return cfg
+
+    def organized_run_dir(self, run_name: str) -> Path:
+        return self.output_root() / safe_name(run_name)
+
+    def _copy_file_if_exists(self, source: Path, dest_dir: Path) -> bool:
+        source = Path(source)
+        if not source.is_file():
+            return False
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, dest_dir / source.name)
+        return True
+
+    def _copy_dir_if_exists(self, source: Path, dest_dir: Path) -> int:
+        source = Path(source)
+        if not source.is_dir():
+            return 0
+        target = dest_dir / source.name
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(source, target)
+        return sum(1 for path in target.rglob("*") if path.is_file())
+
+    def _move_file_if_exists(self, source: Path, dest_dir: Path) -> bool:
+        source = Path(source)
+        if not source.is_file():
+            return False
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        target = dest_dir / source.name
+        if source.resolve() == target.resolve():
+            return True
+        if target.exists():
+            target.unlink()
+        shutil.move(str(source), str(target))
+        return True
+
+    def _move_dir_contents_if_exists(self, source: Path, dest_dir: Path) -> int:
+        source = Path(source)
+        if not source.is_dir():
+            return 0
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        moved = 0
+        for path in sorted(source.iterdir()):
+            target = dest_dir / path.name
+            if target.exists():
+                if target.is_dir():
+                    shutil.rmtree(target)
+                else:
+                    target.unlink()
+            shutil.move(str(path), str(target))
+            moved += sum(1 for item in target.rglob("*") if item.is_file()) if target.is_dir() else 1
+        try:
+            source.rmdir()
+        except OSError:
+            pass
+        return moved
+
+    def organize_run_outputs(self, run_name: str, model_zip: Path, gait_json: Path | None = None) -> None:
+        run_name = safe_name(run_name)
+        root = self.organized_run_dir(run_name)
+        reward_dir = root / "02_reward"
+        categories: list[tuple[str, Path, tuple[str, ...]]] = [
+            ("01_model", ZIP_DIR, (f"{run_name}.zip",)),
+            ("02_reward", reward_dir, (f"{run_name}_eval_reward.png", f"{run_name}_eval_reward.csv", f"{run_name}_eval_debug.csv")),
+            (
+                "03_return_policy_trajectory",
+                reward_dir / "eval_best_policy_curves",
+                (
+                    f"sim_{run_name}_eval_best_policy_fitted_rotated.png",
+                    f"{run_name}_eval_best_policy_trajectory.csv",
+                    f"{run_name}_eval_best_policy_summary.json",
+                ),
+            ),
+            (
+                "04_policy_rerun_mean",
+                self.policy_rollout_out_dir(run_name),
+                (
+                    f"sim_{run_name}_policy_rerun_fitted_rotated.png",
+                    f"{run_name}_policy_rerun_trajectory.csv",
+                    f"{run_name}_policy_rerun_summary.json",
+                    f"sim_{run_name}_policy_rollout_fitted_rotated.png",
+                    f"{run_name}_policy_rollout_trajectory.csv",
+                    f"{run_name}_policy_rollout_summary.json",
+                ),
+            ),
+            ("05_fixed_gait_json", RL_GAIT_DIR, (f"{run_name}.json",)),
+            ("06_fixed_gait_trajectory", self.sim_out_dir(run_name), (f"{run_name}_trajectory.png", f"{run_name}_trajectory.csv", f"{run_name}_summary.json")),
+            ("07_fixed_gait_fitted", self.fit_out_dir(run_name), (f"sim_{run_name}_fitted_rotated.png", f"{run_name}_fitted_summary.json")),
+        ]
+
+        rows: list[dict[str, str | int]] = []
+        for category, source_dir, patterns in categories:
+            dest_dir = root / category
+            copied = 0
+            for pattern in patterns:
+                for path in sorted(source_dir.glob(pattern)):
+                    keep_original = category in {"01_model", "05_fixed_gait_json"}
+                    moved = self._copy_file_if_exists(path, dest_dir) if keep_original else self._move_file_if_exists(path, dest_dir)
+                    if moved:
+                        copied += 1
+            rows.append({"category": category, "files": copied, "path": str(dest_dir)})
+
+        copied_eval_files = self._move_dir_contents_if_exists(root / "08_eval_log_dir" / f"{run_name}_eval", root / "08_eval_log_dir")
+        rows.append({"category": "08_eval_log_dir", "files": copied_eval_files, "path": str(root / "08_eval_log_dir")})
+        if self._copy_file_if_exists(model_zip, root / "01_model"):
+            rows[0]["files"] = int(rows[0]["files"]) + 1
+        if gait_json is not None and self._copy_file_if_exists(gait_json, root / "05_fixed_gait_json"):
+            rows[4]["files"] = int(rows[4]["files"]) + 1
+
+        root.mkdir(parents=True, exist_ok=True)
+        manifest_path = root / "organized_outputs_manifest.csv"
+        with manifest_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=["category", "files", "path"])
+            writer.writeheader()
+            writer.writerows(rows)
+        self.logger.write(f"organized output folder: {root}\n")
+
     def set_busy(self, busy: bool) -> None:
         self.worker_running = busy
 
@@ -602,31 +674,114 @@ class EelPipelineGui:
 
     def _training_output_zip_path(self) -> Path:
         output_base = resolve_gui_path(Path(self.rl_train_output_var.get()))
-        return output_base if output_base.suffix.lower() == ".zip" else output_base.with_suffix(".zip")
+        return model_zip_path(output_base)
 
     def _training_output_zip_for_base(self, output_base: Path) -> Path:
-        return output_base if output_base.suffix.lower() == ".zip" else output_base.with_suffix(".zip")
+        return model_zip_path(output_base)
 
     def _best_model_zip_for_model(self, model_path: Path) -> Path | None:
         model_path = Path(model_path).expanduser().resolve()
         stem = model_path.stem if model_path.suffix.lower() == ".zip" else model_path.name
-        best_zip = CSV_PNG_DIR / f"{stem}_eval" / "best_model" / "best_model.zip"
-        return best_zip if best_zip.exists() else None
+        candidates = [
+            self.organized_run_dir(stem) / "08_eval_log_dir" / "best_model" / "best_model.zip",
+            self.organized_run_dir(stem) / "08_eval_log_dir" / f"{stem}_eval" / "best_model" / "best_model.zip",
+            CSV_PNG_DIR / f"{stem}_eval" / "best_model" / "best_model.zip",
+        ]
+        for best_zip in candidates:
+            if best_zip.exists():
+                return best_zip
+        return None
 
     def _eval_best_policy_summary_for_model(self, model_path: Path) -> Path | None:
         model_path = Path(model_path).expanduser().resolve()
         stem = model_path.stem if model_path.suffix.lower() == ".zip" else model_path.name
-        summary_path = self.eval_best_policy_out_dir() / f"{stem}_eval_best_policy_summary.json"
-        return summary_path if summary_path.exists() else None
+        candidates = [
+            self.eval_best_policy_out_dir(stem) / f"{stem}_eval_best_policy_summary.json",
+            self.organized_run_dir(stem) / "02_reward" / "eval_best_policy_curves" / f"{stem}_eval_best_policy_summary.json",
+            self.eval_best_policy_out_dir() / f"{stem}_eval_best_policy_summary.json",
+        ]
+        for summary_path in candidates:
+            if summary_path.exists():
+                return summary_path
+        return None
+
+    def _policy_summary_for_run(self, run_name: str) -> Path | None:
+        candidates = [
+            self.policy_rollout_out_dir(run_name) / f"{run_name}_policy_rerun_summary.json",
+            self.policy_rollout_out_dir(run_name) / f"{run_name}_policy_rollout_summary.json",
+            self.eval_best_policy_out_dir(run_name) / f"{run_name}_eval_best_policy_summary.json",
+            self.organized_run_dir(run_name) / "02_reward" / "eval_best_policy_curves" / f"{run_name}_eval_best_policy_summary.json",
+        ]
+        for path in candidates:
+            if path.exists():
+                return path
+        return None
+
+    def _set_latest_view_paths(self, run_name: str, model_zip: Path, gait_json: Path | None) -> None:
+        summary_path = self._policy_summary_for_run(run_name)
+        self.root.after(0, lambda path=model_zip: self.view_model_var.set(str(path)))
+        if summary_path is not None:
+            self.root.after(0, lambda path=summary_path: self.view_summary_var.set(str(path)))
+        if gait_json is not None:
+            self.root.after(0, lambda path=gait_json: self.view_gait_var.set(str(path)))
 
     def _build_train_command(self, output_base: Path | None = None) -> list[str]:
+        mode = self.rl_train_mode_var.get().strip()
+        if mode not in {"straight", "turning"}:
+            raise ValueError("Train mode must be straight or turning")
+        output_base = resolve_gui_path(Path(output_base if output_base is not None else self.rl_train_output_var.get()))
+        output_base = model_save_path(output_base)
+        run_name = output_base.name.removesuffix(".zip")
+        run_root = self.organized_run_dir(run_name)
+        reward_dir = run_root / "02_reward"
+        eval_log_dir = run_root / "08_eval_log_dir" / f"{run_name}_eval"
+        plot_output = reward_dir / f"{run_name}_eval_reward.png"
+        reward_dir.mkdir(parents=True, exist_ok=True)
+        eval_log_dir.parent.mkdir(parents=True, exist_ok=True)
+
+        if mode == "straight":
+            freq_low = float(self.rl_frequency_low_var.get())
+            freq_high = float(self.rl_frequency_high_var.get())
+            phase_low = float(self.rl_phase_lag_low_var.get())
+            phase_high = float(self.rl_phase_lag_high_var.get())
+            if freq_low > freq_high:
+                raise ValueError("Straight freq low cannot be greater than freq high")
+            if phase_low > phase_high:
+                raise ValueError("Straight phase_lag low cannot be greater than phase_lag high")
+            cmd = [
+                sys.executable,
+                str(SCRIPT_DIR / "train_free_swim_rl.py"),
+                "--timesteps",
+                str(int(self.rl_train_timesteps_var.get())),
+                "--output",
+                str(output_base),
+                "--target-speed",
+                str(float(self.rl_target_speed_var.get())),
+                "--freq-low",
+                str(freq_low),
+                "--freq-high",
+                str(freq_high),
+                "--phase-lag-low",
+                str(phase_low),
+                "--phase-lag-high",
+                str(phase_high),
+                "--eval-freq",
+                str(int(self.rl_eval_freq_var.get())),
+                "--eval-log-dir",
+                str(eval_log_dir),
+                "--plot-output",
+                str(plot_output),
+            ]
+            load_model = self.rl_load_model_var.get().strip()
+            if load_model:
+                cmd += ["--load-model", str(resolve_gui_path(Path(load_model)))]
+            avg_seconds = self._parse_optional_float(self.rl_reward_average_seconds_var.get(), "avg seconds")
+            if avg_seconds is not None:
+                cmd += ["--reward-average-seconds", str(avg_seconds)]
+            return cmd
+
         if not self.rl_use_yaw_reward_var.get() and not self.rl_use_radius_reward_var.get():
             raise ValueError("Reward must use at least one of yaw_rate or R")
-        output_base = resolve_gui_path(Path(output_base if output_base is not None else self.rl_train_output_var.get()))
-        if output_base.suffix.lower() == ".zip":
-            output_base = output_base.with_suffix("")
-        eval_base = CSV_PNG_DIR / output_base.name
-
         cmd = [
             sys.executable,
             str(SCRIPT_DIR / "train_turning_rl.py"),
@@ -641,9 +796,9 @@ class EelPipelineGui:
             "--eval-freq",
             str(int(self.rl_eval_freq_var.get())),
             "--eval-log-dir",
-            str(eval_base.with_name(f"{eval_base.name}_eval")),
+            str(eval_log_dir),
             "--plot-output",
-            str(eval_base.with_name(f"{eval_base.name}_eval_reward.png")),
+            str(plot_output),
         ]
 
         radius = self._parse_optional_float(self.rl_target_radius_var.get(), "target radius")
@@ -686,11 +841,14 @@ class EelPipelineGui:
     def _run_rl_train(self, export: bool, view: bool, plot: bool) -> None:
         count = self.run_count()
         base_name = self.run_base_name()
+        mode = self.rl_train_mode_var.get().strip()
+        output_template = resolve_gui_path(Path(self.rl_train_output_var.get()))
+        output_template = model_zip_path(output_template)
         last_model_zip: Path | None = None
         last_output_json: Path | None = None
         for index in range(1, count + 1):
             run_name = self.numbered_name(base_name, index, count)
-            output_base = ZIP_DIR / run_name
+            output_base = output_template if count == 1 else output_template.with_name(f"{run_name}.zip")
             output_json = RL_GAIT_DIR / f"{run_name}.json"
             cmd = self._build_train_command(output_base)
             self.logger.write(f"\n=== RL PPO training {index}/{count}: {run_name} ===\n")
@@ -704,13 +862,46 @@ class EelPipelineGui:
 
             last_model_zip = model_zip
             last_output_json = output_json
-            if export:
-                self._run_rl_export_with_model(model_zip, view=view and index == count, plot=plot, output_path=output_json)
+            if mode == "straight":
+                self._run_free_swim_post_train_outputs(run_name, model_zip, output_json)
+            else:
+                self._run_rl_export_with_model(model_zip, view=False, plot=True, output_path=output_json)
+            self.organize_run_outputs(run_name, model_zip, output_json)
+            self._set_latest_view_paths(run_name, model_zip, output_json)
 
         if last_model_zip is not None:
             self.root.after(0, lambda path=last_model_zip: self.rl_model_var.set(str(path)))
         if last_output_json is not None:
             self.root.after(0, lambda path=last_output_json: self.rl_output_json_var.set(str(path)))
+
+    def _run_free_swim_post_train_outputs(self, run_name: str, model_zip: Path, output_json: Path) -> None:
+        cfg = self.make_free_swim_config_from_gui()
+        best_model = self._best_model_zip_for_model(model_zip)
+        export_model = best_model or model_zip
+        run_root = self.organized_run_dir(run_name)
+        free_swim_batch.POLICY_RERUN_DIR = self.policy_rollout_out_dir(run_name)
+        free_swim_batch.TRAJ_DIR = self.sim_out_dir(run_name)
+        free_swim_batch.FIT_DIR = self.fit_out_dir(run_name)
+        free_swim_batch.JSON_DIR = run_root / "05_fixed_gait_json"
+        self.logger.write("\n=== Free-swim policy rerun and fixed gait ===\n")
+        self.logger.write(f"selected_model={model_zip}\n")
+        self.logger.write(f"fixed_gait_model={export_model}\n")
+        self.logger.write(f"target_speed={cfg.target_speed}\n")
+        arr, total_reward = rollout_free_swim_policy_with_actions(export_model, cfg)
+        policy_outputs = write_free_swim_policy_rerun_outputs(run_name, cfg, export_model, arr, total_reward)
+        gait_path, diag = write_free_swim_mean_gait_json(run_name, cfg, export_model, arr, Path(policy_outputs["policy_rerun_csv"]))
+        if gait_path != output_json:
+            output_json.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(gait_path, output_json)
+            gait_path = output_json
+        trajectory_outputs = write_free_swim_fixed_gait_trajectory(run_name, gait_path, cfg)
+        fitted_outputs = write_free_swim_fixed_gait_fitted(run_name, Path(trajectory_outputs["trajectory_csv"]))
+        self.logger.write(f"saved gait JSON: {gait_path}\n")
+        self.logger.write(f"policy rerun plot: {policy_outputs.get('policy_rerun_png')}\n")
+        self.logger.write(f"fixed gait plot: {trajectory_outputs.get('trajectory_png')}\n")
+        self.logger.write(f"fixed gait fitted plot: {fitted_outputs.get('fitted_png')}\n")
+        self.logger.write("diagnostics: " + json.dumps(diag, indent=2) + "\n")
+        self.root.after(0, lambda path=gait_path: self._append_gait_path_to_selection(path))
 
     def _run_command_stream(self, cmd: list[str]) -> None:
         proc = subprocess.Popen(
@@ -771,12 +962,13 @@ class EelPipelineGui:
         self.logger.write("strategy=policy-rerun-mean\n")
 
         gait_name = output_path.stem
+        run_root = self.organized_run_dir(gait_name)
         outputs, diag = write_mean_fixed_gait_from_best_policy(
             name=gait_name,
             cfg=cfg,
             model_zip=export_model,
             gait_path=output_path,
-            policy_out_dir=self.policy_rollout_out_dir(),
+            policy_out_dir=self.policy_rollout_out_dir(gait_name),
             source_extra={
                 "gui": {
                     "selected_model": str(model_path),
@@ -791,8 +983,8 @@ class EelPipelineGui:
         self.root.after(0, lambda: self._append_gait_path_to_selection(output_path))
 
         if plot:
-            sim_out = self.sim_out_dir()
-            fit_out = self.fit_out_dir()
+            sim_out = self.sim_out_dir(gait_name)
+            fit_out = self.fit_out_dir(gait_name)
             sim_out.mkdir(parents=True, exist_ok=True)
             fit_out.mkdir(parents=True, exist_ok=True)
             start_x, start_y = self._sim_start_xy()
@@ -821,7 +1013,7 @@ class EelPipelineGui:
         best_model = self._best_model_zip_for_model(model_path)
         plot_model = best_model or model_path
         model_source = "best_eval" if best_model is not None else "selected_model"
-        out_dir = self.policy_rollout_out_dir()
+        out_dir = self.policy_rollout_out_dir(name)
         out_dir.mkdir(parents=True, exist_ok=True)
         self.logger.write("\n=== PPO policy rollout curve ===\n")
         self.logger.write(f"model_source={model_source}\n")
@@ -850,6 +1042,22 @@ class EelPipelineGui:
             paths.insert(0, path)
         self.gait_json_var.set(self._join_paths([str(p) for p in paths]))
 
+    def view_selected_result(self) -> None:
+        if self.view_mode_var.get() == "return_policy":
+            model_path = self.view_model_var.get().strip() or self.rl_model_var.get().strip()
+            if not model_path:
+                messagebox.showerror("Missing model", "Please select a return policy .zip first.")
+                return
+            summary_text = self.view_summary_var.get().strip()
+            self._launch_return_policy_viewer(Path(model_path), Path(summary_text) if summary_text else None)
+            return
+
+        gait_path = self.view_gait_var.get().strip() or self.rl_output_json_var.get().strip()
+        if not gait_path:
+            messagebox.showerror("Missing fixed gait", "Please select a fixed gait JSON first.")
+            return
+        self._launch_viewer(Path(gait_path), start_x=0.0, start_y=0.0)
+
     def view_first_json(self) -> None:
         paths = self.selected_gait_jsons()
         if not paths:
@@ -868,7 +1076,7 @@ class EelPipelineGui:
         if paths:
             self._start_thread(self._run_json_gaits, [paths[0]])
 
-    def _launch_viewer(self, gait_path: Path, *, start_x: float, start_y: float) -> None:
+    def _launch_viewer(self, gait_path: Path, *, start_x: float = 0.0, start_y: float = 0.0) -> None:
         gait_path = Path(gait_path).expanduser().resolve()
         if not gait_path.exists():
             messagebox.showerror("Missing JSON", f"Gait JSON not found: {gait_path}")
@@ -882,9 +1090,61 @@ class EelPipelineGui:
             str(start_x),
             "--start-y",
             str(start_y),
-            "--print-contacts",
+            "--camera-mode",
+            "follow",
         ]
         self.logger.write("\n=== Launch viewer ===\n")
+        self.logger.write("CMD: " + " ".join(cmd) + "\n")
+        try:
+            self.viewer_process = subprocess.Popen(
+                cmd,
+                cwd=SCRIPT_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+        except OSError as exc:
+            messagebox.showerror("Launch viewer failed", str(exc))
+            return
+        self.viewer_thread = threading.Thread(target=self._read_viewer_output, daemon=True)
+        self.viewer_thread.start()
+
+    def _launch_return_policy_viewer(self, model_path: Path, summary_path: Path | None) -> None:
+        model_path = Path(model_path).expanduser().resolve()
+        if not model_path.exists():
+            messagebox.showerror("Missing model", f"PPO model zip not found: {model_path}")
+            return
+        if summary_path is not None:
+            summary_path = Path(summary_path).expanduser().resolve()
+            if not summary_path.exists():
+                messagebox.showerror("Missing summary", f"Policy summary JSON not found: {summary_path}")
+                return
+        self.stop_viewer(silent=True)
+        cmd = [
+            sys.executable,
+            str(SCRIPT_DIR / "view_return_policy.py"),
+            str(model_path),
+            "--mode",
+            "auto" if summary_path is not None else self.rl_train_mode_var.get().strip(),
+            "--camera-mode",
+            "follow",
+        ]
+        if summary_path is not None:
+            cmd += ["--summary", str(summary_path)]
+        if self.rl_train_mode_var.get().strip() == "straight":
+            cmd += ["--target-speed", str(float(self.rl_target_speed_var.get()))]
+        else:
+            cmd += [
+                "--turn-direction",
+                self.rl_turn_direction_var.get().strip(),
+                "--target-yaw-rate",
+                str(abs(float(self.rl_target_yaw_rate_var.get()))),
+            ]
+            radius = self._parse_optional_float(self.rl_target_radius_var.get(), "target radius")
+            if radius is not None:
+                cmd += ["--target-radius", str(abs(radius))]
+        self.logger.write("\n=== Launch return policy viewer ===\n")
         self.logger.write("CMD: " + " ".join(cmd) + "\n")
         try:
             self.viewer_process = subprocess.Popen(
@@ -1096,9 +1356,7 @@ class EelPipelineGui:
             turn_direction=target_info.get("turn_direction"),
             target_radius_m=target_radius_for_plot,
         )
-        CSV_PNG_DIR.mkdir(parents=True, exist_ok=True)
-        curve_output_png = CSV_PNG_DIR / fitted_png.name
-        shutil.copy2(fitted_png, curve_output_png)
+        curve_output_png = fitted_png
         fitted_summary.update(
             {
                 "gait_name_in_json": gait.get("name"),
@@ -1142,107 +1400,6 @@ class EelPipelineGui:
             f"rmse={float(fitted_summary.get('rmse') or 0.0):.4f}m\n"
         )
         return fitted_summary
-
-    def start_mp4s(self) -> None:
-        videos = self.selected_videos()
-        if not videos:
-            messagebox.showerror("Missing MP4", "Please select one or more MP4 files first.")
-            return
-        self._start_thread(self._run_real_videos, videos)
-
-    def _run_real_videos(self, videos: list[Path]) -> None:
-        out_root = self.real_out_dir()
-        out_root.mkdir(parents=True, exist_ok=True)
-        px_per_m = float(self.px_per_m_var.get())
-        write_preview = bool(self.preview_var.get())
-
-        self.logger.write("\n=== Real video tracking ===\n")
-        self.logger.write(f"count={len(videos)}\n")
-        self.logger.write(f"out_root={out_root}\n")
-        self.logger.write(f"px_per_m={px_per_m:.6f}\n")
-
-        for video_path in videos:
-            video_path = Path(video_path).expanduser().resolve()
-            self.logger.write(f"\nVideo: {video_path}\n")
-            if not video_path.exists():
-                self.logger.write("  SKIP: file not found\n")
-                continue
-            process_video(video_path=video_path, out_root=out_root, write_preview=write_preview, px_per_m=px_per_m)
-            summary_path = out_root / video_path.stem / "tracked_center_summary_cleaned_physical.json"
-            result = json.loads(summary_path.read_text(encoding="utf-8"))
-            self._log_real_result(result, summary_path)
-
-    def start_selected_pipeline(self) -> None:
-        videos = self.selected_videos()
-        gait_jsons = self.selected_gait_jsons()
-        if not videos and not gait_jsons:
-            messagebox.showerror("Missing input", "Please select MP4 files and/or gait JSON files first.")
-            return
-        self._start_thread(self._run_selected_pipeline, videos, gait_jsons)
-
-    def _run_selected_pipeline(self, videos: list[Path], gait_jsons: list[Path]) -> None:
-        self.logger.write("\n=== Selected file pipeline ===\n")
-        if videos:
-            self._run_real_videos(videos)
-        else:
-            self.logger.write("No MP4 files selected; skipping real video tracking.\n")
-
-        if gait_jsons:
-            self._run_json_gaits(gait_jsons)
-        else:
-            self.logger.write("No gait JSON files selected; skipping MuJoCo JSON gait analysis.\n")
-
-    def start_curves(self) -> None:
-        self._start_thread(self._run_fitted_curves)
-
-    def _run_fitted_curves(self) -> None:
-        real_out = self.real_out_dir()
-        sim_out = self.sim_out_dir()
-        fit_out = self.fit_out_dir()
-        fit_out.mkdir(parents=True, exist_ok=True)
-        self.logger.write("\n=== Fitted gait curves / real-vs-sim comparison ===\n")
-        self._run_command(
-            [
-                sys.executable,
-                "plot_fitted_gait_curves.py",
-                "--sim-dir",
-                str(sim_out),
-                "--video-analysis-dir",
-                str(real_out),
-                "--recordings-dir",
-                str(real_out),
-                "--out-dir",
-                str(fit_out),
-            ]
-        )
-
-    def _run_command(self, cmd: list[str]) -> None:
-        self.logger.write("CMD: " + " ".join(cmd) + "\n")
-        proc = subprocess.run(cmd, cwd=SCRIPT_DIR, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-        if proc.stdout:
-            self.logger.write(proc.stdout)
-        if proc.returncode != 0:
-            raise RuntimeError(f"Command failed with exit code {proc.returncode}: {' '.join(cmd)}")
-
-    def _log_real_result(self, result: dict, summary_path: Path) -> None:
-        self.logger.write(f"  points={result.get('point_count')} fit={result.get('fit_kind')}\n")
-        if result.get("fit_kind") == "circle":
-            self.logger.write(
-                f"  R={result.get('radius_px'):.3f}px = {result.get('radius_m'):.4f}m, "
-                f"arc={result.get('arc_deg'):.3f}deg, rmse={result.get('rmse_px'):.3f}px\n"
-            )
-        else:
-            speed = result.get("forward_speed_m_s")
-            speed_text = "nan" if speed is None else f"{speed:.4f}m/s"
-            self.logger.write(
-                f"  forward={result.get('forward_distance_m'):.4f}m, speed={speed_text}, line_rmse={result.get('rmse_px'):.3f}px\n"
-            )
-            self.logger.write("  speed source: fitted-line vertical forward displacement, not left-right drift.\n")
-        self.logger.write(f"  JSON: {summary_path}\n")
-        preview = result.get("preview_image")
-        if preview:
-            self.logger.write(f"  Preview: {preview}\n")
-
 
 def main() -> None:
     root = tk.Tk()

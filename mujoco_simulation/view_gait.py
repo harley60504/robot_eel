@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--print-contacts", action="store_true")
     parser.add_argument("--viewer-fps", type=float, default=60.0, help="Viewer render FPS used for real-time pacing.")
     parser.add_argument("--camera-mode", choices=("fixed", "follow"), default="fixed")
-    parser.add_argument("--camera-distance", type=float, default=1.4)
+    parser.add_argument("--camera-distance", type=float, default=6.0)
     parser.add_argument("--camera-elevation", type=float, default=-70.0)
     parser.add_argument(
         "--contact-ignore-seconds",
@@ -61,11 +61,11 @@ def main():
 
     base_body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
 
-    wall_geom_ids = {
-        mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
-        for name in ("wall_bottom", "wall_top", "wall_left", "wall_right")
-    }
-    wall_geom_ids.discard(-1)
+    for geom_id in range(model.ngeom):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
+        if name.startswith("wall_"):
+            model.geom_contype[geom_id] = 0
+            model.geom_conaffinity[geom_id] = 0
 
     ajoint_deg = float(gait["ajoint"])
     ajoint_rad = degrees_to_radians(ajoint_deg)
@@ -94,7 +94,7 @@ def main():
     print("  joint_bias=", ", ".join(f"{value:.3f}" for value in cpg_params.joint_bias or ()), flush=True)
     print("  MuJoCo adapter: servo joint axes are axis=\"0 0 -1\" in eel.xml", flush=True)
     print("  viewer pacing: real-time wall-clock pacing with batched MuJoCo steps", flush=True)
-    print("  wall behavior: reset on wall contact and keep swimming", flush=True)
+    print("  tank: shared x/y +/-10 m visual pool; wall collision disabled", flush=True)
     print("  R measurement: disabled; use plot_fixed_gait_trajectories.py + plot_fitted_gait_curves.py", flush=True)
 
     def reset_to_start():
@@ -106,18 +106,6 @@ def main():
         cpg.reset()
         reset_count += 1
         mujoco.mj_forward(model, data)
-
-    def detect_wall_contact() -> tuple[bool, list[str]]:
-        examples: list[str] = []
-        hit_wall = False
-        for i in range(data.ncon):
-            contact = data.contact[i]
-            if contact.geom1 in wall_geom_ids or contact.geom2 in wall_geom_ids:
-                hit_wall = True
-                g1 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom1) or f"geom{contact.geom1}"
-                g2 = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, contact.geom2) or f"geom{contact.geom2}"
-                examples.append(f"{g1}<->{g2}")
-        return hit_wall, examples
 
     reset_to_start()
 
@@ -145,19 +133,6 @@ def main():
                 data.ctrl[0:6] = np.clip(targets, -1.2, 1.2)
                 mujoco.mj_step(model, data)
                 base_pos = data.xpos[base_body_id]
-
-                hit_wall, contact_examples = detect_wall_contact()
-                if hit_wall and data.time >= args.contact_ignore_seconds:
-                    if args.print_contacts:
-                        examples = sorted(set(contact_examples))[:3]
-                        print(f"wall contact: {examples}", flush=True)
-                    else:
-                        print(f"wall contact: x={base_pos[0]:.3f}, y={base_pos[1]:.3f}", flush=True)
-
-                    print("reset to start", flush=True)
-                    reset_to_start()
-                    base_pos = data.xpos[base_body_id]
-                    break
 
             now = time.time()
             if now - last_print >= print_period:
