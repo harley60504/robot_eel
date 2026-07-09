@@ -35,7 +35,7 @@ UART packet headers are mirrored on both ESP32 boards:
 ## Install
 
 ```bat
-cd python_backend
+cd ..\..
 python -m pip install -r requirements.txt
 ```
 
@@ -109,10 +109,11 @@ POST http://127.0.0.1:8765/settings/camera_mode
 {"camera_mode":"realsense_d435i_color_depth"}
 ```
 
-For D435i, install the Intel RealSense Python package:
+For D435i, the Intel RealSense Python package is included in the repository root requirements:
 
 ```bat
-python -m pip install pyrealsense2 numpy
+cd ..\..
+python -m pip install -r requirements.txt
 ```
 
 The `camera_mode_d435i_color.bat`, `camera_mode_d435i_depth.bat`, and

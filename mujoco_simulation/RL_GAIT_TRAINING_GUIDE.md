@@ -11,7 +11,9 @@ cd C:\Users\ytyla\Documents\GitHub\robot_eel\mujoco_simulation
 Install required packages first if this is a new Python environment:
 
 ```powershell
-python -m pip install mujoco numpy matplotlib gymnasium stable-baselines3
+cd ..
+python -m pip install -r requirements.txt
+cd mujoco_simulation
 ```
 
 ## 1. File outputs and what they mean
@@ -21,11 +23,11 @@ python -m pip install mujoco numpy matplotlib gymnasium stable-baselines3
 | `outputs/zips/ppo_free_swim_shape.zip` | PPO model for straight free-swim shape tuning | `export_rl_gait_json.py` |
 | `outputs/zips/ppo_turn_left_shape_bias.zip` | PPO model for left turning gait training | `export_turning_rl_gait_json.py` |
 | `outputs/zips/ppo_turn_right_shape_bias.zip` | PPO model for right turning gait training | `export_turning_rl_gait_json.py` |
-| `outputs/json/rl_gaits/rl_straight.json` | fixed straight RL gait JSON | `gait_gui.py`, `view_gait.py` |
-| `outputs/json/rl_gaits/rl_turn_left.json` | fixed left-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
-| `outputs/json/rl_gaits/rl_turn_right.json` | fixed right-turn RL gait JSON | `gait_gui.py`, `view_gait.py`, `measure_turning.py` |
+| `outputs/json/rl_gaits/rl_straight.json` | fixed straight RL gait JSON | `eel_pipeline_gui.py`, `view_gait.py` |
+| `outputs/json/rl_gaits/rl_turn_left.json` | fixed left-turn RL gait JSON | `eel_pipeline_gui.py`, `view_gait.py`, `measure_turning.py` |
+| `outputs/json/rl_gaits/rl_turn_right.json` | fixed right-turn RL gait JSON | `eel_pipeline_gui.py`, `view_gait.py`, `measure_turning.py` |
 
-`gait_gui.py` reads both `gaits/*.json` and `outputs/json/rl_gaits/*.json`. RL gaits are shown first in the Fixed Gait list.
+`eel_pipeline_gui.py` is the current training, export, plotting, and viewing GUI. The older `gait_gui.py` was moved to `legacy_unused/`.
 
 ## 2. Straight free-swim PPO
 
@@ -58,7 +60,7 @@ python export_rl_gait_json.py --model outputs/zips/ppo_free_swim_shape.zip --out
 ### Open GUI and test
 
 ```powershell
-python gait_gui.py
+python eel_pipeline_gui.py
 ```
 
 In the GUI, select `Fixed Gait`, press `Refresh`, then choose `[RL] rl_straight`.
@@ -264,7 +266,7 @@ For straight gait:
 ```powershell
 python train_free_swim_rl.py --timesteps 500000 --output outputs/zips/ppo_free_swim_shape
 python export_rl_gait_json.py --model outputs/zips/ppo_free_swim_shape.zip --output outputs/json/rl_gaits/rl_straight.json
-python gait_gui.py
+python eel_pipeline_gui.py
 ```
 
 For left and right turning gaits:
@@ -278,7 +280,7 @@ python export_turning_rl_gait_json.py --turn-direction right --model outputs/zip
 
 python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_left.json
 python measure_turning.py --gait outputs/json/rl_gaits/rl_turn_right.json
-python gait_gui.py
+python eel_pipeline_gui.py
 ```
 
 ## 9. What not to change first
