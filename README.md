@@ -33,49 +33,33 @@ http://127.0.0.1:8765/
 
 ## MuJoCo Simulation
 
-Install the Python packages used by the simulation:
-
-```powershell
-python -m pip install mujoco numpy matplotlib
-```
-
-For PPO/RL training, also install:
-
-```powershell
-python -m pip install gymnasium stable-baselines3
-```
-
-For detailed RL training, export, parameter, and GUI-testing commands, see:
+The simulation environment was tested with:
 
 ```text
-mujoco_simulation/RL_GAIT_TRAINING_GUIDE.md
+Python 3.13.7
+MuJoCo 3.4.0
+Gymnasium 1.2.2
+Stable-Baselines3 2.7.1
 ```
 
-Open the gait GUI:
+Install the Python packages from the repository root:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Open the current training and viewing GUI:
 
 ```powershell
 cd mujoco_simulation
-python gait_gui.py
+python eel_pipeline_gui.py
 ```
 
-Useful GUI modes:
-
-- `Rectangle Course` - follows the 3 m x 1.5 m pool rectangle.
-- `Fixed Gait` - previews a selected saved gait from the short-side middle start.
-- `CPG Step Test` - compares Hopf CPG and direct sine response to parameter changes.
-
-Run the rectangle-course validation:
+View a saved fixed gait directly in MuJoCo:
 
 ```powershell
 cd mujoco_simulation
-python measure_rectangle_course.py --seconds 60
-```
-
-Expected healthy result:
-
-```text
-out_of_bounds=False
-wall_contact_steps=0
+python view_gait.py gaits/straight.json
 ```
 
 Plot fixed-gait trajectories:
@@ -92,16 +76,7 @@ cd mujoco_simulation
 python train_free_swim_rl.py
 ```
 
-Export a trained PPO policy to a fixed gait JSON:
-
-```powershell
-cd mujoco_simulation
-python export_rl_gait_json.py --model outputs/zips/ppo_free_swim_shape.zip --output gaits/rl_straight.json
-```
-
-The exporter rolls out the trained policy, converts PPO actions back to physical CPG parameters, and saves a `gaits/*.json` file with `amp_scales` and `phase_lags`. The exported file can be opened from the GUI with `Fixed Gait`. The free-swim RL action does not include `joint_bias`, so exported free-swim PPO gaits are straight-swim presets by default.
-
-Train a turning PPO policy with a turning reward:
+Train turning PPO policies:
 
 ```powershell
 cd mujoco_simulation
@@ -109,23 +84,26 @@ python train_turning_rl.py --turn-direction left --target-yaw-rate 0.45 --output
 python train_turning_rl.py --turn-direction right --target-yaw-rate 0.45 --output outputs/zips/ppo_turn_right_shape_bias
 ```
 
-The turning RL action has 17 values: `6 amp_scales + 5 phase_lags + 6 joint_bias`. Its reward encourages target signed yaw rate or optional target radius, useful forward speed, correct turn direction, low lateral slip, low energy, and smooth actions.
-
-Export trained turning policies to fixed turning gait JSON files:
+Run the free-swim paper batch pipeline:
 
 ```powershell
 cd mujoco_simulation
-python export_turning_rl_gait_json.py --turn-direction left --model outputs/zips/ppo_turn_left_shape_bias.zip --output gaits/rl_turn_left.json
-python export_turning_rl_gait_json.py --turn-direction right --model outputs/zips/ppo_turn_right_shape_bias.zip --output gaits/rl_turn_right.json
+python run_free_swim_paper_10.py
 ```
 
-Validate the exported open-loop turning gaits:
+For detailed RL training, export, parameter, and GUI-testing commands, see:
 
-```powershell
-cd mujoco_simulation
-python measure_turning.py --gait gaits/rl_turn_left.json
-python measure_turning.py --gait gaits/rl_turn_right.json
+```text
+mujoco_simulation/RL_GAIT_TRAINING_GUIDE.md
 ```
+
+Older rectangle-course, tethered-swim, and legacy exporter scripts are kept under:
+
+```text
+mujoco_simulation/legacy_unused/
+```
+
+The default fixed gaits are in `mujoco_simulation/gaits/`. RL and batch outputs are written under `mujoco_simulation/outputs/`.
 
 ## Firmware
 
@@ -139,7 +117,7 @@ The camera board is the main app-facing board. It relays commands to the control
 ## Notes
 
 - MuJoCo models use the `3 m x 1.5 m` tank in `mujoco_simulation/environment_3x1_5.xml`.
-- Fixed gait and CPG step tests start from the short-side middle area at `x=-1.10, y=0.00`.
-- Rectangle tracking uses an internal route at `x=+/-1.10`, `y=+/-0.35`.
+- Current free-swim, turning, and fixed-gait scripts use `mujoco_simulation/eel.xml`.
+- The default simulation start position is `x=0.0, y=0.0`.
 - The repository includes recorded videos under `Release/python_backend/recordings/` and `robot_eel/recordings/`; some files are larger than GitHub's recommended 50 MB size but below the 100 MB hard limit.
 
