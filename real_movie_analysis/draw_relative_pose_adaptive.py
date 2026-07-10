@@ -10,10 +10,15 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+try:
+    from PIL import Image, ImageDraw, ImageFont
+except ImportError:  # pragma: no cover - OpenCV text fallback still works for ASCII.
+    Image = ImageDraw = ImageFont = None
+
 
 DEFAULT_PX_PER_M = 269.2105609870623
-W, H = 1800, 1050
-ML, MR, MT, MB = 150, 90, 100, 125
+W, H = 1120, 920
+ML, MR, MT, MB = 110, 55, 70, 105
 PW, PH = W - ML - MR, H - MT - MB
 
 # BGR colors for OpenCV. These match the adaptive figures generated on 2026-06-25.
@@ -25,6 +30,10 @@ BODY = (172, 150, 92)
 BODY_DARK = (125, 104, 62)
 BODY_LIGHT = (202, 186, 130)
 LED = (35, 58, 230)
+FONT_PATHS = [
+    Path(r"C:\Windows\Fonts\msjh.ttc"),
+    Path(r"C:\Windows\Fonts\mingliu.ttc"),
+]
 
 
 def parse_args() -> argparse.Namespace:
@@ -39,30 +48,72 @@ def parse_args() -> argparse.Namespace:
 
 
 def lab(img: np.ndarray, text: str, org: tuple[int, int], scale: float = 0.72, color=TXT, thickness: int = 2) -> None:
+    if any(ord(ch) > 127 for ch in text) and Image is not None:
+        font_path = next((path for path in FONT_PATHS if path.exists()), None)
+        if font_path is not None:
+            font = ImageFont.truetype(str(font_path), max(12, int(round(scale * 34))))
+            rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(rgb)
+            draw = ImageDraw.Draw(pil_img)
+            fill = (int(color[2]), int(color[1]), int(color[0]))
+            draw.text(org, text, font=font, fill=fill, stroke_width=max(1, thickness), stroke_fill=(255, 255, 255))
+            img[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            return
     cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, (255, 255, 255), thickness + 3, cv2.LINE_AA)
     cv2.putText(img, text, org, cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness, cv2.LINE_AA)
+
+
+def turn_title(summary: dict) -> str:
+    direction = summary.get("direction") or "turn"
+    command_value = summary.get("command_value")
+    if command_value not in ("", None):
+        radius_code = f"r{int(round(float(command_value) * 10)):02d}"
+        return f"轉彎 {direction} {radius_code}"
+    return f"轉彎 {direction}"
 
 
 def red_mask(frame: np.ndarray) -> np.ndarray:
     hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     hue, sat, val = cv2.split(hsv)
     blue, green, red = cv2.split(frame)
-    hsv_red = ((hue <= 12) | (hue >= 166)) & (sat >= 90) & (val >= 50)
+    hsv_red = ((hue <= 12) | (hue >= 166)) & (sat >= 100) & (val >= 55)
     red_dominant = (
-        (red.astype(np.int16) > green.astype(np.int16) + 30)
-        & (red.astype(np.int16) > blue.astype(np.int16) + 30)
-        & (red >= 75)
+        (red.astype(np.int16) > green.astype(np.int16) + 35)
+        & (red.astype(np.int16) > blue.astype(np.int16) + 35)
+        & (red >= 65)
     )
-    return cv2.medianBlur((hsv_red | red_dominant).astype(np.uint8) * 255, 3)
+    mask = (hsv_red & red_dominant).astype(np.uint8) * 255
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((3, 3), np.uint8))
+    return mask
 
 
-def led_points(frame: np.ndarray) -> list[tuple[float, float, int]]:
+def led_points(frame: np.ndarray, expected: tuple[float, float] | None = None) -> list[tuple[float, float, int]]:
     count, _, stats, centroids = cv2.connectedComponentsWithStats(red_mask(frame), 8)
     components = []
+    height, width = frame.shape[:2]
+    top_margin = max(80.0, height * 0.12)
+    side_margin = max(6.0, width * 0.015)
+    bottom_margin = max(8.0, height * 0.01)
     for i in range(1, count):
         area = int(stats[i, cv2.CC_STAT_AREA])
         if 3 <= area <= 700:
-            components.append((area, float(centroids[i][0]), float(centroids[i][1])))
+            cx, cy = centroids[i]
+            if cy < top_margin or cy > height - bottom_margin or cx < side_margin or cx > width - side_margin:
+                continue
+            components.append((area, float(cx), float(cy)))
+    if expected is not None and components:
+        ex, ey = expected
+        band = max(140.0, min(width, height) * 0.55)
+        nearby = [item for item in components if math.hypot(item[1] - ex, item[2] - ey) <= band]
+        if nearby:
+            seed_x = float(np.median([item[1] for item in nearby]))
+            x_band = max(55.0, width * 0.13)
+            line_group = [item for item in components if abs(item[1] - seed_x) <= x_band]
+            if len(line_group) >= 2:
+                components = line_group
+            elif len(nearby) >= 2:
+                components = nearby
     return [(x, y, area) for area, x, y in sorted(components, key=lambda item: item[0], reverse=True)[:6]]
 
 
@@ -160,7 +211,10 @@ def pick_circle(rows: list[dict], summary: dict, count: int) -> list[dict]:
 
 
 def pick_straight(rows: list[dict], count: int = 5) -> list[dict]:
-    return [rows[int(round(i))] for i in np.linspace(0, len(rows) - 1, count)]
+    if count <= 1:
+        return [rows[len(rows) // 2]]
+    positions = np.linspace(0, len(rows) - 1, count, endpoint=False)
+    return [rows[int(round(i))] for i in positions]
 
 
 def smooth(points, window: int = 11) -> np.ndarray:
@@ -239,7 +293,14 @@ def capsule(p0, p1, width: float, n: int = 12) -> np.ndarray:
 
 def draw_eel(img: np.ndarray, points, index: int) -> None:
     pts = [np.array(point, float) for point in points]
-    if len(pts) < 2:
+    if len(pts) == 1:
+        center = tuple(np.round(pts[0]).astype(int))
+        cv2.circle(img, center, 8, BODY_LIGHT, -1, cv2.LINE_AA)
+        cv2.circle(img, center, 9, BODY_DARK, 2, cv2.LINE_AA)
+        cv2.circle(img, center, 3, LED, -1, cv2.LINE_AA)
+        lab(img, str(index), tuple(np.round(pts[0] + np.array([10, -8])).astype(int)), 0.56, TXT, 2)
+        return
+    if len(pts) < 1:
         return
     median_spacing = max(16, float(np.median([np.linalg.norm(pts[i + 1] - pts[i]) for i in range(len(pts) - 1)])))
     width = max(18, min(34, median_spacing * 0.58))
@@ -317,10 +378,10 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
             pose_sets.append([])
             continue
         color = frame[:, : frame.shape[1] // 2] if frame.shape[1] >= 1600 else frame
-        pose_sets.append(order_points(led_points(color), local_velocity(rows, row)))
+        pose_sets.append(order_points(led_points(color, (row["x"], row["y"])), local_velocity(rows, row)))
     cap.release()
 
-    if any(len(points) < 2 for points in pose_sets):
+    if not any(pose_sets):
         return None
 
     tr, scale, bounds = transform(rows, summary, pose_sets, px_per_m)
@@ -340,21 +401,20 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
         radius_m = float(summary.get("measured_radius_m") or 0)
         yaw_rate = float(summary.get("measured_yaw_rate_abs_rad_s") or abs(float(summary.get("measured_yaw_rate_rad_s") or 0)))
         metric = f"R = {radius_m:.3f} m    yaw_rate = {yaw_rate:.3f} rad/s"
-        title = f"{title_prefix}{video_dir.name}: turning, real LED posture ({count} snapshots)"
+        title = f"{title_prefix}{turn_title(summary)}"
     else:
         start = tr(rows[0]["x"], rows[0]["y"])
         end = tr(rows[-1]["x"], rows[-1]["y"])
         cv2.line(img, tuple(np.round(start).astype(int)), tuple(np.round(end).astype(int)), (220, 225, 250), 9, cv2.LINE_AA)
         cv2.line(img, tuple(np.round(start).astype(int)), tuple(np.round(end).astype(int)), FIT_RED, 4, cv2.LINE_AA)
         metric = f"v = {float(summary.get('straight_speed_m_s', 0)):.3f} m/s"
-        title = f"{title_prefix}{video_dir.name}: straight swimming, real LED posture"
+        title = f"{title_prefix}直線"
 
-    lab(img, title, (ML, 44), 0.76, TXT, 2)
-    lab(img, metric, (ML + 18, 78), 0.72, FIT_RED, 2)
+    lab(img, metric, (ML, 36), 0.72, FIT_RED, 2)
     for index, (_row, points) in enumerate(zip(selected, pose_sets), 1):
         draw_eel(img, [tr(x, y) for x, y in points], index)
     for index, row in enumerate(selected, 1):
-        lab(img, f"{index}: {row['time']:.1f}s", (W - 260, 118 + 34 * index), 0.56, TXT, 2)
+        lab(img, f"{index}: {row['time']:.1f}s", (W - 205, 86 + 34 * index), 0.56, TXT, 2)
 
     out = out_root / f'{title_prefix.replace("/", "_")}{video_dir.name}_relative_pose_adaptive_teal_red.jpg'
     cv2.imwrite(str(out), img)
