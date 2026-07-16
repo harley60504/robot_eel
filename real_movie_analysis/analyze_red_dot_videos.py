@@ -79,11 +79,15 @@ def parse_video_meta(stem: str) -> VideoMeta:
         target_speed = int(target_match.group(1)) / 100.0
         direction = "backward" if "back" in normalized else "forward"
         return VideoMeta(direction, "straight_speed", target_speed, "m/s")
-    direction_match = re.search(r"turn_(left|right)", normalized)
-    radius_match = re.search(r"(?:^|_)r(\d{2})(?:_|$)", normalized)
+    if "rgb_string" in normalized or re.search(r"(?:^|_)turn0(?:\.0+)?", normalized):
+        return VideoMeta("straight", "straight", None, None)
+    direction_match = re.search(r"(?:^|_)(?:turn_)?(left|right)(?:_|$)", normalized)
+    radius_match = re.search(r"(?:^|_)r(\d+(?:\.\d+)?)(?:_|$)", normalized)
     yaw_match = re.search(r"(?:^|_)y(\d{2})(?:_|$)", normalized)
     if direction_match and radius_match:
-        return VideoMeta(direction_match.group(1), "turn_radius", int(radius_match.group(1)) / 10.0, "m")
+        radius_token = radius_match.group(1)
+        radius = float(radius_token) if "." in radius_token else int(radius_token) / 10.0
+        return VideoMeta(direction_match.group(1), "turn_radius", radius, "m")
     if direction_match and yaw_match:
         return VideoMeta(direction_match.group(1), "yaw_rate", int(yaw_match.group(1)) / 10.0, "rad/s")
 
@@ -159,21 +163,35 @@ def detect_red_center(frame: np.ndarray) -> tuple[float, float, int, int] | None
     if not components:
         return None
 
-    total_area = sum(item[0] for item in components)
-    x = sum(area * cx for area, cx, _, _ in components) / total_area
-    y = sum(area * cy for area, _, cy, _ in components) / total_area
-    return float(x), float(y), int(total_area), int(len(components))
+    height, width = frame.shape[:2]
+    top_margin = max(80.0, height * 0.12)
+    side_margin = max(6.0, width * 0.015)
+    interior_components = [
+        item
+        for item in components
+        if top_margin <= item[2] <= height - side_margin
+        and side_margin <= item[1] <= width - side_margin
+    ]
+    led_components = sorted(interior_components or components, key=lambda item: item[0], reverse=True)[:6]
+    total_area = sum(item[0] for item in led_components)
+    x = sum(area * cx for area, cx, _, _ in led_components) / total_area
+    y = sum(area * cy for area, _, cy, _ in led_components) / total_area
+    return float(x), float(y), int(total_area), int(len(led_components))
 
 
-def smooth_points(rows: list[dict]) -> None:
+def smooth_points(rows: list[dict], window: int = 5) -> None:
     valid_indices = [i for i, row in enumerate(rows) if row["detected"]]
     if len(valid_indices) < 3:
         return
+    window = max(3, int(window))
+    if window % 2 == 0:
+        window += 1
     xy = np.array([[rows[i]["x_px"], rows[i]["y_px"]] for i in valid_indices], dtype=float)
     smoothed = xy.copy()
+    half = window // 2
     for j in range(len(valid_indices)):
-        lo = max(0, j - 2)
-        hi = min(len(valid_indices), j + 3)
+        lo = max(0, j - half)
+        hi = min(len(valid_indices), j + half + 1)
         smoothed[j] = np.median(xy[lo:hi], axis=0)
     for j, i in enumerate(valid_indices):
         rows[i]["x_smooth_px"] = float(smoothed[j, 0])
@@ -599,6 +617,7 @@ def analyze_video(
         for old_path in representative_dir.glob("*.png"):
             old_path.unlink()
 
+    meta = parse_video_meta(video_path.stem)
     cap = cv2.VideoCapture(str(video_path))
     fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
     frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
@@ -643,12 +662,15 @@ def analyze_video(
         rows.append(row)
         frame_index += 1
     cap.release()
-    smooth_points(rows)
+    if meta.command_type in {"turn_radius", "yaw_rate"}:
+        smooth_window = 5
+    else:
+        smooth_window = max(5, int(round(fps * 1.5))) if fps > 0 else 31
+    smooth_points(rows, smooth_window)
 
     csv_path = out_dir / "red_dot_tracking.csv"
     write_csv(csv_path, rows)
 
-    meta = parse_video_meta(video_path.stem)
     valid_rows = [row for row in rows if row["detected"]]
     duration_s = frame_count / fps if fps > 0 else 0.0
     title = video_path.stem
