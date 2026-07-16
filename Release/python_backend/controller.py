@@ -74,16 +74,23 @@ class ControlState:
     output_mode: str = "cpg"     # "angle" = mode 3 + set_angle, "cpg" = mode 1 + set_param
     angle_mode_id: int = 3
     cpg_mode_id: int = 1
-    camera_mode: str = "opengopro_preview"
+    camera_mode: str = "realsense_d435i_color"
     gopro_base_url: str = "http://10.5.5.9:8080"
     gopro_preview_port: int = 8554
-    recorder_url: str = "udp://0.0.0.0:8554"
+    recorder_url: str = "realsense://d435i/color"
     camera_rotate: str = "none"
     camera_width: int = 1920
     camera_height: int = 1080
     realsense_width: int = 848
     realsense_height: int = 480
+    realsense_color_width: int = 848
+    realsense_color_height: int = 480
     realsense_fps: int = 30
+    realsense_color_denoise: bool = False
+    realsense_color_auto_exposure: bool = True
+    realsense_color_configure_sensor: bool = False
+    realsense_color_exposure: float = 12000.0
+    realsense_color_gain: float = 64.0
     recording: bool = False
     recording_path: str = ""
     preview_running: bool = False
@@ -140,14 +147,34 @@ def use_gopro_preview():
 
 def use_realsense():
     with state_lock:
-        return state.camera_mode.lower() in (
-            "realsense_d435i",
-            "realsense_d435i_color",
-            "realsense_d435i_depth",
-            "realsense_d435i_color_depth",
-            "d435i",
-            "realsense",
-        )
+        return is_realsense_mode(state.camera_mode)
+
+def is_realsense_mode(mode):
+    return mode.lower() in (
+        "realsense_d435i",
+        "realsense_d435i_color",
+        "realsense_d435i_color_480p",
+        "realsense_d435i_color_1080p",
+        "realsense_d435i_depth",
+        "realsense_d435i_color_depth",
+        "d435i",
+        "realsense",
+    )
+
+def realsense_output_name(mode):
+    mode = mode.lower()
+    if mode in ("realsense_d435i_color_480p", "realsense_d435i_color_1080p"):
+        return "color"
+    output = mode.replace("realsense_d435i_", "")
+    if output in ("realsense_d435i", "d435i", "realsense"):
+        return "color_depth"
+    return output
+
+def realsense_color_size_for_mode(mode):
+    mode = mode.lower()
+    if mode == "realsense_d435i_color_1080p":
+        return 1920, 1080
+    return 848, 480
 
 def gopro_preview_source(port):
     return f"udp://0.0.0.0:{int(port)}"
@@ -205,29 +232,45 @@ class RealSenseD435iCapture:
             raise RuntimeError("pyrealsense2 is not installed")
 
         with state_lock:
-            width = state.realsense_width
-            height = state.realsense_height
+            depth_width = state.realsense_width
+            depth_height = state.realsense_height
+            color_width = state.realsense_color_width
+            color_height = state.realsense_color_height
             fps = state.realsense_fps
+            color_denoise = state.realsense_color_denoise
+            color_auto_exposure = state.realsense_color_auto_exposure
+            color_configure_sensor = state.realsense_color_configure_sensor
+            color_exposure = state.realsense_color_exposure
+            color_gain = state.realsense_color_gain
             mode = state.camera_mode.lower()
 
         if mode in ("realsense_d435i_depth",):
             self.output_mode = "depth"
-        elif mode in ("realsense_d435i_color",):
+        elif mode in (
+            "realsense_d435i_color",
+            "realsense_d435i_color_480p",
+            "realsense_d435i_color_1080p",
+        ):
             self.output_mode = "color"
         else:
             self.output_mode = "color_depth"
 
         self.pipeline = rs.pipeline()
         config = rs.config()
-        self.width = width
-        self.height = height
+        self.width = color_width if self.output_mode in ("color", "color_depth") else depth_width
+        self.height = color_height if self.output_mode in ("color", "color_depth") else depth_height
         self.fps = float(fps)
+        self.color_denoise = color_denoise
+        self.color_auto_exposure = color_auto_exposure
+        self.color_configure_sensor = color_configure_sensor
+        self.color_exposure = color_exposure
+        self.color_gain = color_gain
         if self.output_mode == "color":
-            config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+            config.enable_stream(rs.stream.color, color_width, color_height, rs.format.bgr8, fps)
         else:
-            config.enable_stream(rs.stream.depth, width, height, rs.format.z16, fps)
+            config.enable_stream(rs.stream.depth, depth_width, depth_height, rs.format.z16, fps)
             if self.output_mode == "color_depth":
-                config.enable_stream(rs.stream.color, width, height, rs.format.bgr8, fps)
+                config.enable_stream(rs.stream.color, color_width, color_height, rs.format.bgr8, fps)
         self.align = rs.align(rs.stream.color) if self.output_mode == "color_depth" else None
         self.colorizer = rs.colorizer()
         self.colorizer.set_option(rs.option.color_scheme, 0)
@@ -235,7 +278,48 @@ class RealSenseD435iCapture:
         self.colorizer.set_option(rs.option.min_distance, 0.15)
         self.colorizer.set_option(rs.option.max_distance, 4.0)
         self.profile = self.pipeline.start(config)
+        if self.color_configure_sensor:
+            self.apply_color_sensor_settings()
         self.opened = True
+
+    def apply_color_sensor_settings(self):
+        if self.output_mode not in ("color", "color_depth"):
+            return
+
+        try:
+            device = self.profile.get_device()
+            color_sensor = None
+            for sensor in device.query_sensors():
+                if sensor.get_info(rs.camera_info.name).lower().find("rgb") >= 0:
+                    color_sensor = sensor
+                    break
+            if color_sensor is None:
+                print("[REALSENSE] RGB sensor not found; color exposure settings skipped")
+                return
+
+            if color_sensor.supports(rs.option.enable_auto_exposure):
+                color_sensor.set_option(
+                    rs.option.enable_auto_exposure,
+                    1.0 if self.color_auto_exposure else 0.0,
+                )
+            if not self.color_auto_exposure:
+                if color_sensor.supports(rs.option.exposure):
+                    color_sensor.set_option(rs.option.exposure, float(self.color_exposure))
+                if color_sensor.supports(rs.option.gain):
+                    color_sensor.set_option(rs.option.gain, float(self.color_gain))
+            print(
+                "[REALSENSE] RGB settings:",
+                f"auto_exposure={self.color_auto_exposure}",
+                f"exposure={self.color_exposure}",
+                f"gain={self.color_gain}",
+            )
+        except Exception as e:
+            print("[REALSENSE] RGB exposure settings failed:", e)
+
+    def denoise_color(self, color_image):
+        if not self.color_denoise:
+            return color_image
+        return cv2.bilateralFilter(color_image, 5, 25, 25)
 
     def isOpened(self):
         return self.opened
@@ -248,6 +332,7 @@ class RealSenseD435iCapture:
                 if not color_frame:
                     return False, None
                 color_image = np.asanyarray(color_frame.get_data())
+                color_image = self.denoise_color(color_image)
                 return True, color_image
 
             if self.output_mode == "color_depth":
@@ -265,6 +350,13 @@ class RealSenseD435iCapture:
             if not color_frame:
                 return False, None
             color_image = np.asanyarray(color_frame.get_data())
+            color_image = self.denoise_color(color_image)
+            if depth_image.shape[:2] != color_image.shape[:2]:
+                depth_image = cv2.resize(
+                    depth_image,
+                    (color_image.shape[1], color_image.shape[0]),
+                    interpolation=cv2.INTER_NEAREST,
+                )
             return True, np.hstack((color_image, depth_image))
         except Exception as e:
             print("[REALSENSE] frame read failed:", e)
@@ -916,7 +1008,14 @@ def root():
             "camera_height": state.camera_height,
             "realsense_width": state.realsense_width,
             "realsense_height": state.realsense_height,
+            "realsense_color_width": state.realsense_color_width,
+            "realsense_color_height": state.realsense_color_height,
             "realsense_fps": state.realsense_fps,
+            "realsense_color_denoise": state.realsense_color_denoise,
+            "realsense_color_auto_exposure": state.realsense_color_auto_exposure,
+            "realsense_color_configure_sensor": state.realsense_color_configure_sensor,
+            "realsense_color_exposure": state.realsense_color_exposure,
+            "realsense_color_gain": state.realsense_color_gain,
             "recording": state.recording,
             "recording_path": state.recording_path,
             "preview_running": state.preview_running,
@@ -998,18 +1097,8 @@ def set_recorder_url(req: RecorderUrlReq):
             return {"ok": False, "error": "cannot change recorder_url while camera is active"}
         if state.camera_mode.lower() in ("opengopro_preview", "gopro_preview", "preview"):
             url = gopro_preview_source(state.gopro_preview_port)
-        elif state.camera_mode.lower() in (
-            "realsense_d435i",
-            "realsense_d435i_color",
-            "realsense_d435i_depth",
-            "realsense_d435i_color_depth",
-            "d435i",
-            "realsense",
-        ):
-            output = state.camera_mode.lower().replace("realsense_d435i_", "")
-            if output in ("realsense_d435i", "d435i", "realsense"):
-                output = "color_depth"
-            url = f"realsense://d435i/{output}"
+        elif is_realsense_mode(state.camera_mode):
+            url = f"realsense://d435i/{realsense_output_name(state.camera_mode)}"
         state.recorder_url = url
 
     return {"ok": True, "recorder_url": url}
@@ -1029,6 +1118,14 @@ def set_camera_mode(req: CameraModeReq):
         "realsense": "realsense_d435i_color_depth",
         "realsense_d435i": "realsense_d435i_color_depth",
         "d435i_color": "realsense_d435i_color",
+        "d435i_color_480p": "realsense_d435i_color_480p",
+        "d435i_480p": "realsense_d435i_color_480p",
+        "realsense_color_480p": "realsense_d435i_color_480p",
+        "realsense_d435i_color_480p": "realsense_d435i_color_480p",
+        "d435i_color_1080p": "realsense_d435i_color_1080p",
+        "d435i_1080p": "realsense_d435i_color_1080p",
+        "realsense_color_1080p": "realsense_d435i_color_1080p",
+        "realsense_d435i_color_1080p": "realsense_d435i_color_1080p",
         "realsense_color": "realsense_d435i_color",
         "realsense_d435i_color": "realsense_d435i_color",
         "d435i_depth": "realsense_d435i_depth",
@@ -1041,7 +1138,7 @@ def set_camera_mode(req: CameraModeReq):
     if mode not in aliases:
         return {
             "ok": False,
-            "error": "camera_mode must be rtsp, opengopro_preview, realsense_d435i_color, realsense_d435i_depth, or realsense_d435i_color_depth",
+            "error": "camera_mode must be rtsp, opengopro_preview, realsense_d435i_color_480p, realsense_d435i_color_1080p, realsense_d435i_depth, or realsense_d435i_color_depth",
         }
 
     normalized = aliases[mode]
@@ -1065,12 +1162,15 @@ def set_camera_mode(req: CameraModeReq):
         elif normalized == "opengopro_preview":
             state.recorder_url = gopro_preview_source(state.gopro_preview_port)
         elif normalized.startswith("realsense_d435i"):
-            state.recorder_url = f"realsense://d435i/{normalized.replace('realsense_d435i_', '')}"
+            state.recorder_url = f"realsense://d435i/{realsense_output_name(normalized)}"
+            state.realsense_color_width, state.realsense_color_height = realsense_color_size_for_mode(normalized)
 
     return {
         "ok": True,
         "camera_mode": normalized,
         "recorder_url": state.recorder_url,
+        "realsense_color_width": state.realsense_color_width,
+        "realsense_color_height": state.realsense_color_height,
     }
 
 @app.post("/settings/gopro_base_url")

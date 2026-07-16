@@ -74,7 +74,7 @@ def resolve_gui_path(path: Path) -> Path:
 
 
 def safe_name(value: str) -> str:
-    safe = "".join(ch if ch.isalnum() or ch in ("_", "-", ".") else "_" for ch in value.strip())
+    safe = "".join(ch if ch.isalnum() or ch in ("_", "-") else "_" for ch in value.strip().replace(".", ""))
     return safe.strip("._") or "robot_eel_output"
 
 
