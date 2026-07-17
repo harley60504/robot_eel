@@ -174,7 +174,7 @@ def local_velocity(rows: list[dict], row: dict) -> tuple[float, float]:
 
 def pose_count(summary: dict) -> int:
     if summary.get("fit_kind") != "circle":
-        return 5
+        return 3 if summary.get("direction") in {"forward", "backward"} else 5
     radius = float(summary.get("measured_radius_m") or 0)
     if radius < 0.32:
         return 3
@@ -215,6 +215,21 @@ def pick_straight(rows: list[dict], count: int = 5) -> list[dict]:
         return [rows[len(rows) // 2]]
     positions = np.linspace(0, len(rows) - 1, count, endpoint=False)
     return [rows[int(round(i))] for i in positions]
+
+
+def straight_display_rows(all_rows: list[dict], summary: dict) -> list[dict]:
+    if summary.get("fit_kind") == "circle":
+        return metric_rows(all_rows, summary)
+    direction = summary.get("direction")
+    windows = {
+        "forward": (2.0, 13.4),
+        "backward": (2.0, 15.0),
+    }
+    if direction not in windows:
+        return metric_rows(all_rows, summary)
+    start, end = windows[direction]
+    kept = [row for row in all_rows if start <= row["time"] <= end]
+    return kept or metric_rows(all_rows, summary)
 
 
 def smooth(points, window: int = 11) -> np.ndarray:
@@ -365,8 +380,9 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
     if not all_rows:
         return None
     rows = metric_rows(all_rows, summary)
+    display_rows = straight_display_rows(all_rows, summary)
     count = pose_count(summary)
-    selected = pick_circle(rows, summary, count) if fit == "circle" else pick_straight(rows, count)
+    selected = pick_circle(rows, summary, count) if fit == "circle" else pick_straight(display_rows, count)
 
     video_path = resolve_video_path(summary, video_root, video_dir)
     cap = cv2.VideoCapture(str(video_path))
@@ -378,17 +394,17 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
             pose_sets.append([])
             continue
         color = frame[:, : frame.shape[1] // 2] if frame.shape[1] >= 1600 else frame
-        pose_sets.append(order_points(led_points(color, (row["x"], row["y"])), local_velocity(rows, row)))
+        pose_sets.append(order_points(led_points(color, (row["x"], row["y"])), local_velocity(display_rows, row)))
     cap.release()
 
     if not any(pose_sets):
         return None
 
-    tr, scale, bounds = transform(rows, summary, pose_sets, px_per_m)
+    tr, scale, bounds = transform(display_rows, summary, pose_sets, px_per_m)
     img = np.full((H, W, 3), 255, np.uint8)
     cv2.rectangle(img, (ML, MT), (W - MR, H - MB), (238, 240, 242), 1, cv2.LINE_AA)
     draw_axes(img, tr, bounds, px_per_m)
-    dashed(img, smooth([tr(row["x"], row["y"]) for row in rows]))
+    dashed(img, smooth([tr(row["x"], row["y"]) for row in display_rows]))
 
     if fit == "circle":
         cx = float(summary["circle_center_x_px"])
@@ -403,8 +419,8 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
         metric = f"R = {radius_m:.3f} m    yaw_rate = {yaw_rate:.3f} rad/s"
         title = f"{title_prefix}{turn_title(summary)}"
     else:
-        start = tr(rows[0]["x"], rows[0]["y"])
-        end = tr(rows[-1]["x"], rows[-1]["y"])
+        start = tr(display_rows[0]["x"], display_rows[0]["y"])
+        end = tr(display_rows[-1]["x"], display_rows[-1]["y"])
         cv2.line(img, tuple(np.round(start).astype(int)), tuple(np.round(end).astype(int)), (220, 225, 250), 9, cv2.LINE_AA)
         cv2.line(img, tuple(np.round(start).astype(int)), tuple(np.round(end).astype(int)), FIT_RED, 4, cv2.LINE_AA)
         metric = f"v = {float(summary.get('straight_speed_m_s', 0)):.3f} m/s"
@@ -413,8 +429,13 @@ def render(video_dir: Path, video_root: Path | None, out_root: Path, px_per_m: f
     lab(img, metric, (ML, 36), 0.72, FIT_RED, 2)
     for index, (_row, points) in enumerate(zip(selected, pose_sets), 1):
         draw_eel(img, [tr(x, y) for x, y in points], index)
-    for index, row in enumerate(selected, 1):
-        lab(img, f"{index}: {row['time']:.1f}s", (W - 205, 86 + 34 * index), 0.56, TXT, 2)
+
+    dashed(img, smooth([tr(row["x"], row["y"]) for row in display_rows]), color=(205, 160, 190), thickness=3, dash=12, gap=9)
+    if fit == "circle":
+        cv2.circle(img, tuple(np.round(center).astype(int)), int(round(radius * scale)), FIT_RED, 4, cv2.LINE_AA)
+        cv2.circle(img, tuple(np.round(center).astype(int)), 5, FIT_RED, -1, cv2.LINE_AA)
+    else:
+        cv2.line(img, tuple(np.round(start).astype(int)), tuple(np.round(end).astype(int)), FIT_RED, 4, cv2.LINE_AA)
 
     out = out_root / f'{title_prefix.replace("/", "_")}{video_dir.name}_relative_pose_adaptive_teal_red.jpg'
     cv2.imwrite(str(out), img)

@@ -1,7 +1,7 @@
 {
-  "name": "eel_train_gui",
+  "name": "straight_speed_013_run06",
   "ajoint": 20.0,
-  "freq": 1.0,
+  "freq": 0.699999988079071,
   "wavelength": 1.6275,
   "amp_scales": [
     1.225,
@@ -12,11 +12,11 @@
     1.225
   ],
   "phase_lags": [
-    0.7996048237383365,
-    0.6927968689799309,
-    0.6189602199196815,
-    0.7723789051175117,
-    0.6190532103180886
+    0.7201172885298729,
+    0.6890456065535545,
+    0.40870024941861627,
+    0.6514146634191275,
+    0.4678335700929165
   ],
   "joint_bias": [
     0.0,
@@ -28,13 +28,13 @@
   ],
   "source": {
     "type": "free_swim_best_policy_rerun_mean_fixed_gait",
-    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\eel_train_gui\\08_eval_log_dir\\eel_train_gui_eval\\best_model\\best_model.zip",
+    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\straight_speed_013_run06\\08_eval_log_dir\\straight_speed_013_run06_eval\\best_model\\best_model.zip",
     "strategy": "policy-rerun-mean",
-    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\eel_train_gui\\04_policy_rerun_mean\\eel_train_gui_policy_rerun_trajectory.csv",
+    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\straight_speed_013_run06\\04_policy_rerun_mean\\straight_speed_013_run06_policy_rerun_trajectory.csv",
     "steady_action_count": 400,
-    "steady_reward_mean": -0.10104991808186739,
-    "steady_reward_min": -0.11472269925256104,
-    "steady_reward_max": -0.09121270809825821,
+    "steady_reward_mean": -0.040384784776774006,
+    "steady_reward_min": -0.04371409696061021,
+    "steady_reward_max": -0.039200000181676554,
     "env_config": {
       "xml_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\eel.xml",
       "episode_seconds": 10.0,
@@ -54,12 +54,12 @@
       "start_x": 0.0,
       "start_y": 0.0,
       "normalized_actions": true,
-      "frequency_low": 1.0,
+      "frequency_low": 0.7,
       "frequency_high": 1.2,
-      "phase_lag_low": 0.5,
+      "phase_lag_low": 0.3,
       "phase_lag_high": 0.8,
       "reward_average_seconds": 1.0,
-      "target_speed": 0.17,
+      "target_speed": 0.13,
       "speed_error_weight": 100.0,
       "energy_weight": 0.08,
       "boundary_x_min": -10.0,

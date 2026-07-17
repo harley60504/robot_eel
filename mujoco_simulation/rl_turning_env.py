@@ -145,8 +145,8 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             lows, highs = self._action_bounds()
             self.action_space = spaces.Box(lows.astype(np.float32), highs.astype(np.float32), dtype=np.float32)
 
-        # q(6), qd(6), cpg features(4), root features(9), previous summary(3)
-        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(28,), dtype=np.float32)
+        # q(6), qd(6), cpg features(4), root/task features(9)
+        self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32)
 
     @property
     def signed_target_yaw_rate(self) -> float:
@@ -353,15 +353,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             ],
             dtype=np.float64,
         )
-        prev_summary = np.array(
-            [
-                float(np.mean(self.cfg.fixed_amp_scales)),
-                float(np.mean(self.cfg.fixed_phase_lags)),
-                float(np.mean(self.prev_action)),
-            ],
-            dtype=np.float64,
-        )
-        return np.concatenate((q, qd, phase_features, root, prev_summary)).astype(np.float32)
+        return np.concatenate((q, qd, phase_features, root)).astype(np.float32)
 
 
 if __name__ == "__main__":
