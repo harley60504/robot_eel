@@ -86,7 +86,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         self.step_count = 0
         self.action_dim = 6
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
-        self.cpg = HopfCPG(num_joints=6)
+        self.cpg = HopfCPG(num_joints=6, params=self._initial_cpg_params())
         self.velocity_window = deque(
             maxlen=max(1, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)))
         )
@@ -113,6 +113,7 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         self.step_count = 0
         self.prev_action[:] = 0.0
         self.velocity_window.clear()
+        self.cpg.params = self._initial_cpg_params()
         self.cpg.reset()
         mujoco.mj_forward(self.model, self.data)
         return self._obs(), {}
@@ -217,6 +218,16 @@ class EelFreeSwimRLEnv(gym.Env if gym is not None else object):
         lows, highs = self._action_bounds()
         unit = 0.5 * (action + 1.0)
         return lows + unit * (highs - lows)
+
+    def _initial_cpg_params(self) -> HopfCPGParams:
+        return HopfCPGParams(
+            frequency=self.cfg.fixed_frequency,
+            wavelength=self.cfg.fixed_wavelength,
+            ajoint=self.cfg.fixed_ajoint,
+            mu_scales=amp_scales_to_mu_scales(self.cfg.fixed_amp_scales),
+            phase_lags=None,
+            joint_bias=(0.0,) * 6,
+        )
 
     def _obs(self) -> np.ndarray:
         q = self.data.qpos[self.tail_qpos_addr]

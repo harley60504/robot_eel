@@ -69,10 +69,16 @@ void handleSetParam(JsonDocument &doc)
         }
     }
 
-    if (doc["phaseLags"].is<JsonArray>()) {
+    const bool hasPhaseLags = doc["phaseLags"].is<JsonArray>();
+    if (hasPhaseLags) {
         JsonArray arr = doc["phaseLags"].as<JsonArray>();
         for (int i = 0; i < bodyNum - 1 && i < arr.size(); i++) {
             g_pkt.phaseLags[i] = arr[i].as<float>();
+        }
+    } else if (doc.containsKey("lambda")) {
+        const float phaseLag = 1.0f / max(g_pkt.lambda, 1e-6f);
+        for (int i = 0; i < bodyNum - 1; i++) {
+            g_pkt.phaseLags[i] = phaseLag;
         }
     }
 

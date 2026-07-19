@@ -127,7 +127,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.tail_amp_indices = self._tail_amp_indices()
         self.action_dim = 6 + len(self.tail_amp_indices) #輸出6項bias，可選尾端amp
         self.prev_action = np.zeros(self.action_dim, dtype=np.float64)
-        self.cpg = HopfCPG(num_joints=6)
+        self.cpg = HopfCPG(num_joints=6, params=self._initial_cpg_params())
         self.metric_window = deque(
             maxlen=max(1, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)))
         )
@@ -163,6 +163,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.prev_action[:] = 0.0
         self.metric_window.clear()
         self.position_window.clear()
+        self.cpg.params = self._initial_cpg_params()
         self.cpg.reset()
         mujoco.mj_forward(self.model, self.data)
         base_pos = self.data.xpos[self.base_body_id]
@@ -325,6 +326,16 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         for offset, joint_index in enumerate(self.tail_amp_indices):
             amp_scales[joint_index] *= float(physical_action[6 + offset])
         return tuple(amp_scales)
+
+    def _initial_cpg_params(self) -> HopfCPGParams:
+        return HopfCPGParams(
+            frequency=self.cfg.fixed_frequency,
+            wavelength=self.cfg.fixed_wavelength,
+            ajoint=self.cfg.fixed_ajoint,
+            mu_scales=amp_scales_to_mu_scales(self.cfg.fixed_amp_scales),
+            phase_lags=tuple(float(value) for value in self.cfg.fixed_phase_lags),
+            joint_bias=(0.0,) * 6,
+        )
 
     def _obs(self) -> np.ndarray:
         q = self.data.qpos[self.tail_qpos_addr]
