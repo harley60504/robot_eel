@@ -86,7 +86,8 @@ The backend supports three camera modes for preview and recording:
 
 - `rtsp`: original Wi-Fi RTSP camera.
 - `opengopro_preview`: GoPro Wi-Fi OpenGoPro preview stream.
-- `realsense_d435i_color`: Intel RealSense D435i color stream only.
+- `realsense_d435i_color_480p`: Intel RealSense D435i color stream only, `848 x 480`, better for lights-off recordings.
+- `realsense_d435i_color_1080p`: Intel RealSense D435i color stream only, `1920 x 1080`, better for lights-on recordings.
 - `realsense_d435i_depth`: Intel RealSense D435i aligned depth colormap only.
 - `realsense_d435i_color_depth`: Intel RealSense D435i color + aligned depth stream.
 
@@ -100,7 +101,10 @@ POST http://127.0.0.1:8765/settings/camera_mode
 {"camera_mode":"opengopro_preview"}
 
 POST http://127.0.0.1:8765/settings/camera_mode
-{"camera_mode":"realsense_d435i_color"}
+{"camera_mode":"realsense_d435i_color_480p"}
+
+POST http://127.0.0.1:8765/settings/camera_mode
+{"camera_mode":"realsense_d435i_color_1080p"}
 
 POST http://127.0.0.1:8765/settings/camera_mode
 {"camera_mode":"realsense_d435i_depth"}
@@ -116,15 +120,18 @@ cd ..\..
 python -m pip install -r requirements.txt
 ```
 
-The `camera_mode_d435i_color.bat`, `camera_mode_d435i_depth.bat`, and
-`camera_mode_d435i_color_depth.bat` files switch between the three D435i
-outputs. The combined mode records a side-by-side frame: color on the left,
-aligned depth colormap on the right.
+Use `camera_mode_d435i_color_1080p.bat` for lights-on recordings and
+`camera_mode_d435i_color_480p.bat` for lights-off recordings. The
+`camera_mode_d435i_color.bat`, `camera_mode_d435i_depth.bat`, and
+`camera_mode_d435i_color_depth.bat` files switch between common D435i outputs.
+The combined mode records a side-by-side frame: color on the left, aligned
+depth colormap on the right.
 
-The D435i stream size is `848 x 480 @ 30 FPS`. Color-only and depth-only output
-are `848 x 480`; combined color+depth output is `1696 x 480`. RealSense frames
-are not stretched to `1920 x 1080`, so the preview keeps the camera's real
-aspect ratio. The source name shown by the backend is:
+The D435i RGB and depth stream size is `848 x 480 @ 30 FPS`. Color-only and
+depth-only output are `848 x 480`; combined color+depth output is
+`1696 x 480`. RealSense frames are not stretched to `1920 x 1080`, so the
+preview keeps the camera's real aspect ratio. The source name shown by the
+backend is:
 
 ```text
 realsense://d435i/color_depth
