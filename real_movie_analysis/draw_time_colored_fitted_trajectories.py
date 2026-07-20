@@ -41,6 +41,13 @@ def load_summary(path: Path) -> dict | None:
     return data
 
 
+def is_task_summary(summary: dict) -> bool:
+    return (
+        summary.get("command_type") in {"straight_speed", "turn_radius", "yaw_rate"}
+        and summary.get("command_value") is not None
+    )
+
+
 def load_track(summary: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     csv_path = Path(summary["tracking_csv"])
     if not csv_path.exists():
@@ -223,7 +230,11 @@ def main() -> None:
     individual_dir = out_dir / "individual"
     individual_dir.mkdir(parents=True, exist_ok=True)
 
-    summaries = [item for path in root.rglob("summary.json") if (item := load_summary(path))]
+    summaries = [
+        item
+        for path in root.rglob("summary.json")
+        if (item := load_summary(path)) and is_task_summary(item)
+    ]
     for preferred_path in args.preferred_summary:
         preferred = load_summary(preferred_path.resolve())
         if preferred is None:
@@ -233,7 +244,8 @@ def main() -> None:
             item for item in summaries
             if Path(item["_summary_path"]).resolve() != preferred_path.resolve()
         ]
-        summaries.append(preferred)
+        if is_task_summary(preferred):
+            summaries.append(preferred)
     if not summaries:
         raise SystemExit(f"No per-video summary.json files found under {root}")
 
