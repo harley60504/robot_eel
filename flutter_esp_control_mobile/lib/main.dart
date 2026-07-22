@@ -9,6 +9,7 @@ import 'pages/wifi_page.dart';
 import 'ui/ui_layout.dart';
 import 'widgets/camera_control.dart';
 import 'widgets/control_dashboard.dart';
+import 'widgets/imu_status_panel.dart';
 import 'widgets/python_rtsp_preview.dart';
 import 'widgets/servo_table.dart';
 
@@ -274,7 +275,14 @@ class _SettingsSheetState extends State<_SettingsSheet> {
     final pages = [
       const WiFiPage(compact: true),
       const CameraControlPanel(compact: true, embedded: true),
-      const ServoTable(compact: true),
+      const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ServoTable(compact: true),
+          SizedBox(height: 12),
+          ImuStatusPanel(compact: true),
+        ],
+      ),
       _ConnectionSettings(onSaved: () => setState(() {})),
     ];
 

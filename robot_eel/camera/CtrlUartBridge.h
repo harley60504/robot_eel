@@ -7,6 +7,7 @@
 #include "ServoTargetPacket.h"
 #include "ServoCenterPacket.h"
 #include "ServoStatusPacket.h"
+#include "ImuPacket.h"
 
 namespace CtrlUartBridge {
 
@@ -26,4 +27,5 @@ namespace CtrlUartBridge {
   // callbacks（UART RX → 上層）
   extern std::function<void(const ControlParamsPacket&)> onCtrlParams;
   extern std::function<void(const ServoStatusPacket&)>   onServoStatusPacket;
+  extern std::function<void(const ImuPacket&)>           onImuPacket;
 }

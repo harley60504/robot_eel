@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../api/python_api.dart';
+import '../bridge/python_bridge.dart';
 import '../bridge/python_process_launcher.dart';
 import '../config.dart';
 
@@ -24,6 +25,9 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
   bool busy = false;
   bool recording = false;
   bool recordingBusy = false;
+  bool exportServoCsv = true;
+  bool exportImuCsv = true;
+  bool telemetryBusy = false;
   bool fetchingFrame = false;
   int frames = 0;
   double localFps = 0;
@@ -33,7 +37,14 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
   @override
   void initState() {
     super.initState();
-    startPreview();
+    ensurePythonReady().then((ready) {
+      if (!mounted || !ready) return;
+      refreshPreviewStatus();
+      statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        refreshPreviewStatus();
+      });
+      setState(() => status = "RTSP preview stopped");
+    });
   }
 
   @override
@@ -75,6 +86,7 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
     }
 
     final pcHost = ApiConfig.pythonHost;
+    await PythonBridge.syncEsp32HostToPython(pcHost: pcHost);
     await PythonApi.setRecorderUrl(
       pcHost: pcHost,
       recorderUrl: ApiConfig.recorderUrl,
@@ -111,6 +123,14 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
     });
   }
 
+  Future<void> togglePreview() async {
+    if (running) {
+      await stopPreview();
+    } else {
+      await startPreview();
+    }
+  }
+
   Future<void> toggleRecording() async {
     if (recordingBusy) return;
     setState(() => recordingBusy = true);
@@ -122,9 +142,15 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
     }
 
     final pcHost = ApiConfig.pythonHost;
+    await PythonBridge.syncEsp32HostToPython(pcHost: pcHost);
     await PythonApi.setRecorderUrl(
       pcHost: pcHost,
       recorderUrl: ApiConfig.recorderUrl,
+    );
+    await PythonApi.setRecordingTelemetry(
+      pcHost: pcHost,
+      servo: exportServoCsv,
+      imu: exportImuCsv,
     );
 
     final ok = recording
@@ -178,7 +204,91 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
     setState(() {
       streamFps = backendFps;
       running = isRunning;
+      exportServoCsv = data["record_export_servo_csv"] != false;
+      exportImuCsv = data["record_export_imu_csv"] != false;
     });
+  }
+
+  Future<void> setTelemetryExport({
+    required bool servo,
+    required bool imu,
+  }) async {
+    setState(() {
+      exportServoCsv = servo;
+      exportImuCsv = imu;
+    });
+    await PythonApi.setRecordingTelemetry(
+      pcHost: ApiConfig.pythonHost,
+      servo: exportServoCsv,
+      imu: exportImuCsv,
+    );
+  }
+
+  Future<void> downloadTelemetryCsv(String kind) async {
+    if (telemetryBusy) return;
+    setState(() {
+      telemetryBusy = true;
+      status = "Downloading $kind CSV...";
+    });
+
+    final ready = await ensurePythonReady();
+    if (!ready) {
+      if (mounted) setState(() => telemetryBusy = false);
+      return;
+    }
+
+    final pcHost = ApiConfig.pythonHost;
+    await PythonBridge.syncEsp32HostToPython(pcHost: pcHost);
+
+    final path = await PythonApi.downloadTelemetryCsv(
+      pcHost: pcHost,
+      kind: kind,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      telemetryBusy = false;
+      status = path == null ? "Download $kind CSV failed" : "Saved $kind CSV";
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(path ?? "Download $kind CSV failed"),
+      ),
+    );
+  }
+
+  Future<void> clearTelemetryLogs() async {
+    if (telemetryBusy) return;
+    setState(() {
+      telemetryBusy = true;
+      status = "Clearing telemetry logs...";
+    });
+
+    final ready = await ensurePythonReady();
+    if (!ready) {
+      if (mounted) setState(() => telemetryBusy = false);
+      return;
+    }
+
+    final pcHost = ApiConfig.pythonHost;
+    await PythonBridge.syncEsp32HostToPython(pcHost: pcHost);
+
+    final ok = await PythonApi.clearTelemetryLogs(
+      pcHost: pcHost,
+    );
+
+    if (!mounted) return;
+    setState(() {
+      telemetryBusy = false;
+      status = ok ? "Telemetry logs cleared" : "Clear telemetry failed";
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok ? "Telemetry logs cleared" : "Clear telemetry failed"),
+      ),
+    );
   }
 
   void calcFps() {
@@ -230,14 +340,127 @@ class _PythonRtspPreviewState extends State<PythonRtspPreview> {
           Positioned(
             top: 8,
             right: 8,
-            child: IconButton.filled(
-              tooltip: recording ? "Stop recording" : "Start recording",
-              onPressed: recordingBusy ? null : toggleRecording,
-              style: IconButton.styleFrom(
-                backgroundColor: recording ? Colors.redAccent : null,
-                foregroundColor: Colors.white,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(12),
               ),
-              icon: Icon(recording ? Icons.stop : Icons.fiber_manual_record),
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                alignment: WrapAlignment.end,
+                children: [
+                  IconButton.filledTonal(
+                    tooltip: running ? "Stop preview" : "Start preview",
+                    onPressed: busy ? null : togglePreview,
+                    icon: Icon(running ? Icons.videocam_off : Icons.videocam),
+                  ),
+                  IconButton.filled(
+                    tooltip: recording ? "Stop recording" : "Start recording",
+                    onPressed: recordingBusy ? null : toggleRecording,
+                    style: IconButton.styleFrom(
+                      backgroundColor: recording ? Colors.redAccent : null,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: Icon(
+                      recording ? Icons.stop : Icons.fiber_manual_record,
+                    ),
+                  ),
+                  _TelemetryPill(
+                    label: "Servo",
+                    selected: exportServoCsv,
+                    icon: Icons.table_chart,
+                    onToggle: (value) => setTelemetryExport(
+                      servo: value,
+                      imu: exportImuCsv,
+                    ),
+                    onDownload: telemetryBusy
+                        ? null
+                        : () => downloadTelemetryCsv("servo"),
+                  ),
+                  _TelemetryPill(
+                    label: "IMU",
+                    selected: exportImuCsv,
+                    icon: Icons.sensors,
+                    onToggle: (value) => setTelemetryExport(
+                      servo: exportServoCsv,
+                      imu: value,
+                    ),
+                    onDownload: telemetryBusy
+                        ? null
+                        : () => downloadTelemetryCsv("imu"),
+                  ),
+                  IconButton.filledTonal(
+                    tooltip: "Clear telemetry logs",
+                    onPressed: telemetryBusy ? null : clearTelemetryLogs,
+                    icon: const Icon(Icons.cleaning_services),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TelemetryPill extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final IconData icon;
+  final ValueChanged<bool> onToggle;
+  final VoidCallback? onDownload;
+
+  const _TelemetryPill({
+    required this.label,
+    required this.selected,
+    required this.icon,
+    required this.onToggle,
+    required this.onDownload,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: selected
+            ? Theme.of(context)
+                .colorScheme
+                .primaryContainer
+                .withValues(alpha: 0.72)
+            : const Color(0xFF1A2027),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Tooltip(
+            message: "Record $label CSV",
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              onPressed: () => onToggle(!selected),
+              icon: Icon(
+                selected ? Icons.check : Icons.close,
+                size: 18,
+              ),
+            ),
+          ),
+          Tooltip(
+            message: "Download $label CSV",
+            child: TextButton.icon(
+              onPressed: onDownload,
+              icon: Icon(icon, size: 18),
+              label: Text(label),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.only(left: 0, right: 10),
+                minimumSize: const Size(0, 40),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
             ),
           ),
         ],

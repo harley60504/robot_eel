@@ -17,6 +17,14 @@ namespace ServoStatusWs {
         const float *error
     );
 
+    void broadcastImu(const ImuPacket &imu);
+
+    void clearImuLog();
+
+    void sendImuCsv(WebServer &server);
+
+    size_t imuLogCount();
+
     void clearLog();
 
     void sendCsv(WebServer &server);

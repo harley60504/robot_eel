@@ -14,9 +14,15 @@ static bool receivingServo = false;
 
 static const size_t SERVO_PKT_SIZE = sizeof(ServoStatusPacket);
 
+static uint8_t imuBuf[sizeof(ImuPacket)];
+static size_t imuIdx = 0;
+static bool receivingImu = false;
+static const size_t IMU_PKT_SIZE = sizeof(ImuPacket);
+
 // callbacks
 std::function<void(const ControlParamsPacket&)> CtrlUartBridge::onCtrlParams = nullptr;
 std::function<void(const ServoStatusPacket&)> CtrlUartBridge::onServoStatusPacket = nullptr;
+std::function<void(const ImuPacket&)> CtrlUartBridge::onImuPacket = nullptr;
 
 // ==================================================
 // UART RX Task
@@ -64,6 +70,38 @@ static void uartRxTask(void *pv)
         continue;
       }
 
+      if (receivingImu)
+      {
+        imuBuf[imuIdx++] = b;
+
+        if (imuIdx >= IMU_PKT_SIZE)
+        {
+          receivingImu = false;
+
+          if (imuBuf[0] == IMU_PACKET_HEADER)
+          {
+            ImuPacket imu;
+            memcpy(&imu, imuBuf, IMU_PKT_SIZE);
+
+            uint8_t cs = calcPacketChecksum(
+              reinterpret_cast<uint8_t*>(&imu),
+              IMU_PKT_SIZE - 1
+            );
+
+            if (cs == imu.checksum)
+            {
+              if (CtrlUartBridge::onImuPacket)
+              {
+                CtrlUartBridge::onImuPacket(imu);
+              }
+            }
+          }
+
+          imuIdx = 0;
+        }
+        continue;
+      }
+
       // =====================================================
       // 2) ControlParamsPacket (0xAA)
       // =====================================================
@@ -87,6 +125,14 @@ static void uartRxTask(void *pv)
         receivingServo = true;
         idx = 0;
         buf[idx++] = b;
+        continue;
+      }
+
+      if (b == IMU_PACKET_HEADER)
+      {
+        receivingImu = true;
+        imuIdx = 0;
+        imuBuf[imuIdx++] = b;
         continue;
       }
 

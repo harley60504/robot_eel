@@ -4,9 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../api/esp_api.dart';
-import '../api/esp_http_api.dart';
 import '../ui/ui_card.dart';
-import '../utils/save_csv_file.dart';
 
 class ServoTable extends StatefulWidget {
   final bool compact;
@@ -104,61 +102,6 @@ class _ServoTableState extends State<ServoTable> {
     super.dispose();
   }
 
-  Future<void> exportCsv() async {
-    final filename = "servo_log_${DateTime.now().millisecondsSinceEpoch}.csv";
-
-    try {
-      final bytes = await EspHttpApi.servoLogCsv();
-      int? samples;
-      try {
-        samples = await EspHttpApi.servoLogStatus();
-      } catch (_) {
-        samples = null;
-      }
-      final path = await saveCsvFile(filename, bytes);
-
-      if (!mounted) return;
-
-      if (path == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("CSV export canceled")),
-        );
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            samples == null
-                ? "Saved CSV: $path"
-                : "Saved CSV: $path ($samples samples)",
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("ESP32 CSV download failed: $e")),
-      );
-    }
-  }
-
-  Future<void> clearServoCache() async {
-    try {
-      final ok = await EspHttpApi.clearServoLog();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(ok ? "ESP32 servo cache cleared" : "Clear failed")),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Clear failed: $e")),
-      );
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final int n = [target.length, actual.length, error.length].reduce(
@@ -246,22 +189,7 @@ class _ServoTableState extends State<ServoTable> {
           ),
         ),
         const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            ElevatedButton(
-              onPressed: exportCsv,
-              child: const Text("Download CSV"),
-            ),
-            OutlinedButton(
-              onPressed: clearServoCache,
-              child: const Text("Clear ESP cache"),
-            ),
-            Text("Log frames: $logCount"),
-          ],
-        ),
+        Text("Log frames: $logCount"),
       ],
     );
 

@@ -125,6 +125,24 @@ void handleServoLogStatus()
     sendJson(200, doc);
 }
 
+void handleImuLogCsv()
+{
+    ServoStatusWs::sendImuCsv(server);
+}
+
+void handleImuLogClear()
+{
+    ServoStatusWs::clearImuLog();
+    server.send(200, "text/plain", "OK");
+}
+
+void handleImuLogStatus()
+{
+    DynamicJsonDocument doc(128);
+    doc["samples"] = ServoStatusWs::imuLogCount();
+    sendJson(200, doc);
+}
+
 } // namespace
 
 void HttpApi::begin()
@@ -140,4 +158,8 @@ void HttpApi::begin()
     server.on("/servo_log.csv", handleServoLogCsv);
     server.on("/servo_log_clear", handleServoLogClear);
     server.on("/servo_log_status", handleServoLogStatus);
+
+    server.on("/imu_log.csv", handleImuLogCsv);
+    server.on("/imu_log_clear", handleImuLogClear);
+    server.on("/imu_log_status", handleImuLogStatus);
 }

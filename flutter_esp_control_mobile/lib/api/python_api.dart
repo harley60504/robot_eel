@@ -225,6 +225,53 @@ class PythonApi {
     }
   }
 
+  static Future<bool> setRecordingTelemetry({
+    required String pcHost,
+    required bool servo,
+    required bool imu,
+  }) async {
+    try {
+      final res = await http.post(
+        _u(pcHost, "/settings/recording_telemetry"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({"servo": servo, "imu": imu}),
+      );
+      return res.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static Future<String?> downloadTelemetryCsv({
+    required String pcHost,
+    required String kind,
+  }) async {
+    try {
+      final res = await http
+          .post(_u(pcHost, "/telemetry/download_csv/$kind"))
+          .timeout(const Duration(seconds: 45));
+      if (res.statusCode != 200) return null;
+      final data = jsonDecode(res.body);
+      if (data is! Map || data["ok"] != true) return null;
+      return data["csv_path"]?.toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<bool> clearTelemetryLogs({required String pcHost}) async {
+    try {
+      final res = await http
+          .post(_u(pcHost, "/telemetry/clear_all"))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) return false;
+      final data = jsonDecode(res.body);
+      return data is Map ? data["ok"] == true : true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Uri previewFrameUri({required String pcHost}) =>
       _u(pcHost, "/preview.jpg");
 

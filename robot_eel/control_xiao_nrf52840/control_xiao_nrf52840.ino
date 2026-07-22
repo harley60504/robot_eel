@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <mbed.h>
+#include <Wire.h>
+#include "LSM6DS3.h"
 
 #include "config.h"
 #include "utils.h"
@@ -9,6 +11,9 @@
 #include "ControlParamsPacket.h"
 #include "ServoTargetPacket.h"
 #include "ServoCenterPacket.h"
+#include "ImuPacket.h"
+
+#define STARTUP_LOG 1
 
 #if defined(ARDUINO_ARCH_MBED)
 UART CameraSerial(
@@ -62,20 +67,26 @@ volatile bool g_haveAngleCmd = false;
 float g_uartTargetDeg[bodyNum] = {0};
 volatile uint32_t g_lastAngleSeq = 0;
 rtos::Mutex angleMutex;
+rtos::Mutex cameraTxMutex;
 
 static rtos::Thread servoThread(osPriorityAboveNormal, 4096, nullptr, "servoTask");
 static rtos::Thread cameraTxThread(osPriorityNormal, 4096, nullptr, "cameraTxTask");
 static rtos::Thread cameraRxThread(osPriorityAboveNormal, 4096, nullptr, "cameraRxTask");
 static rtos::Thread servoStatusThread(osPriorityNormal, 4096, nullptr, "servoStatusTxTask");
+static rtos::Thread imuThread(osPriorityNormal, 4096, nullptr, "imuTask");
+
+static LSM6DS3 imu(I2C_MODE, 0x6A);
+static bool imuReady = false;
 
 void loadServoCenters()
 {
+#if STARTUP_LOG
   Serial.println("[CENTER] nRF52840 version uses built-in defaults.");
+#endif
 }
 
 void saveServoCenters()
 {
-  Serial.println("[CENTER] save requested, but persistent storage is not enabled in this nRF52840 sketch.");
 }
 
 void applyServoCenters(const ServoCenterPacket &pkt)
@@ -91,15 +102,11 @@ void applyServoCenters(const ServoCenterPacket &pkt)
   if (pkt.save) {
     saveServoCenters();
   }
-
-  Serial.print("[CENTER] packet OK seq=");
-  Serial.print((unsigned long)pkt.seq);
-  Serial.print(" save=");
-  Serial.println((unsigned)pkt.save);
 }
 
 void sendCameraControlParams()
 {
+  cameraTxMutex.lock();
   sendControlParamsUART(
     CameraSerial,
     Ajoint,
@@ -113,6 +120,7 @@ void sendCameraControlParams()
     (uint8_t)controlMode,
     servoDefaultAngles
   );
+  cameraTxMutex.unlock();
 }
 
 void cameraTxTask()
@@ -151,11 +159,6 @@ void handleControlPacket(const ControlParamsPacket &pkt)
   if (previousMode != MODE_CPG && controlMode == MODE_CPG) {
     initCPG();
   }
-
-  Serial.print("[UART] ControlParams OK mode=");
-  Serial.print(controlMode);
-  Serial.print(" pause=");
-  Serial.println((int)isPaused);
 }
 
 void serviceCameraRx()
@@ -177,9 +180,6 @@ void serviceCameraRx()
           g_lastAngleSeq = pkt.seq;
           g_haveAngleCmd = true;
         }
-
-        Serial.print("[UART] ServoTarget OK seq=");
-        Serial.println((unsigned long)pkt.seq);
       }
       continue;
     }
@@ -226,8 +226,36 @@ void cameraRxTask()
 void servoStatusTxTask()
 {
   while (true) {
+    cameraTxMutex.lock();
     sendServoStatusUART(CameraSerial);
+    cameraTxMutex.unlock();
     rtos::ThisThread::sleep_for(std::chrono::milliseconds(80));
+  }
+}
+
+void imuTask()
+{
+  static uint32_t seq = 0;
+
+  while (true) {
+    if (imuReady) {
+      cameraTxMutex.lock();
+      sendImuPacketUART(
+        CameraSerial,
+        seq++,
+        millis(),
+        imu.readFloatAccelX(),
+        imu.readFloatAccelY(),
+        imu.readFloatAccelZ(),
+        imu.readFloatGyroX(),
+        imu.readFloatGyroY(),
+        imu.readFloatGyroZ(),
+        imu.readTempC()
+      );
+      cameraTxMutex.unlock();
+    }
+
+    rtos::ThisThread::sleep_for(std::chrono::milliseconds(20));
   }
 }
 
@@ -235,7 +263,7 @@ void setup()
 {
   Serial.begin(115200);
   uint32_t serialWaitStart = millis();
-  while (!Serial && millis() - serialWaitStart < 5000) {
+  while (!Serial && millis() - serialWaitStart < 1000) {
     delay(10);
   }
   delay(300);
@@ -243,25 +271,39 @@ void setup()
   Serial1.begin(115200);
   CameraSerial.begin(115200);
 
+#if STARTUP_LOG
   Serial.println("XIAO nRF52840 Control Board Ready");
+#endif
   loadServoCenters();
+
+#if defined(PIN_LSM6DS3TR_C_POWER)
+  pinMode(PIN_LSM6DS3TR_C_POWER, OUTPUT);
+  digitalWrite(PIN_LSM6DS3TR_C_POWER, HIGH);
+  delay(10);
+#endif
+  Wire.begin();
+
+  if (imu.begin() == 0) {
+    imuReady = true;
+#if STARTUP_LOG
+    Serial.println("[IMU] LSM6DS3 ready");
+#endif
+  } else {
+    imuReady = false;
+#if STARTUP_LOG
+    Serial.println("[IMU] LSM6DS3 init failed");
+#endif
+  }
   initCPG();
 
   servoThread.start(servoTask);
   cameraTxThread.start(cameraTxTask);
   cameraRxThread.start(cameraRxTask);
   servoStatusThread.start(servoStatusTxTask);
+  imuThread.start(imuTask);
 }
 
 void loop()
 {
-  static uint32_t lastHeartbeatMs = 0;
-  uint32_t now = millis();
-
-  if (now - lastHeartbeatMs >= 1000) {
-    lastHeartbeatMs = now;
-    Serial.println("[HB] nRF52840 control alive");
-  }
-
   delay(1000);
 }

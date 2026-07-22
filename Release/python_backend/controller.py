@@ -93,6 +93,8 @@ class ControlState:
     realsense_color_gain: float = 64.0
     recording: bool = False
     recording_path: str = ""
+    record_export_servo_csv: bool = True
+    record_export_imu_csv: bool = True
     preview_running: bool = False
 
 state = ControlState()
@@ -128,6 +130,10 @@ class GoProBaseUrlReq(BaseModel):
 
 class CameraModeReq(BaseModel):
     camera_mode: str
+
+class RecordingTelemetryReq(BaseModel):
+    servo: bool = True
+    imu: bool = True
 
 # =========================
 # Utils
@@ -547,6 +553,15 @@ def recording_gait_copy_path(video_path):
 def recording_servo_csv_path(video_path):
     return Path(video_path).with_name(f"{Path(video_path).stem}_servo_status.csv")
 
+def recording_imu_csv_path(video_path):
+    return Path(video_path).with_name(f"{Path(video_path).stem}_imu_status.csv")
+
+def manual_telemetry_csv_path(kind):
+    recordings_dir = Path(__file__).resolve().parent / "recordings"
+    recordings_dir.mkdir(exist_ok=True)
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    return recordings_dir / f"{timestamp}_{kind}_status.csv"
+
 def esp_http_base_url():
     with state_lock:
         host = state.esp_host.strip()
@@ -562,6 +577,16 @@ def clear_servo_status_log():
         print("[SERVO CSV] clear failed:", exc)
         return False
 
+def clear_imu_status_log():
+    try:
+        with urlopen(f"{esp_http_base_url()}/imu_log_clear", timeout=2.0) as res:
+            ok = res.status == 200
+        print("[IMU CSV] cleared" if ok else "[IMU CSV] clear failed")
+        return ok
+    except (OSError, URLError, TimeoutError) as exc:
+        print("[IMU CSV] clear failed:", exc)
+        return False
+
 def download_servo_status_csv(video_path):
     csv_path = recording_servo_csv_path(video_path)
     try:
@@ -575,6 +600,36 @@ def download_servo_status_csv(video_path):
         return str(csv_path.resolve())
     except (OSError, URLError, TimeoutError) as exc:
         print("[SERVO CSV] download failed:", exc)
+        return None
+
+def download_imu_status_csv(video_path):
+    csv_path = recording_imu_csv_path(video_path)
+    try:
+        with urlopen(f"{esp_http_base_url()}/imu_log.csv", timeout=45.0) as res:
+            data = res.read()
+            if res.status != 200:
+                print("[IMU CSV] download failed status:", res.status)
+                return None
+        csv_path.write_bytes(data)
+        print("[IMU CSV] saved:", csv_path)
+        return str(csv_path.resolve())
+    except (OSError, URLError, TimeoutError) as exc:
+        print("[IMU CSV] download failed:", exc)
+        return None
+
+def download_telemetry_csv(kind, csv_path):
+    endpoint = "servo_log.csv" if kind == "servo" else "imu_log.csv"
+    try:
+        with urlopen(f"{esp_http_base_url()}/{endpoint}", timeout=45.0) as res:
+            data = res.read()
+            if res.status != 200:
+                print(f"[{kind.upper()} CSV] download failed status:", res.status)
+                return None
+        csv_path.write_bytes(data)
+        print(f"[{kind.upper()} CSV] saved:", csv_path)
+        return str(csv_path.resolve())
+    except (OSError, URLError, TimeoutError) as exc:
+        print(f"[{kind.upper()} CSV] download failed:", exc)
         return None
 
 def write_recording_metadata(video_path, gait_info, *, codec=None, fps=None, width=None, height=None, status="recording"):
@@ -608,6 +663,9 @@ def write_recording_metadata(video_path, gait_info, *, codec=None, fps=None, wid
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "video_path": str(video_path.resolve()),
         "servo_status_csv": existing.get("servo_status_csv"),
+        "imu_status_csv": existing.get("imu_status_csv"),
+        "record_export_servo_csv": state.record_export_servo_csv,
+        "record_export_imu_csv": state.record_export_imu_csv,
         "gait_key": gait_info.get("key") if isinstance(gait_info, dict) else None,
         "gait_json_source": source_path,
         "gait_json_copy": gait_copy,
@@ -641,6 +699,47 @@ def attach_servo_status_csv(video_path, gait_info):
         metadata["gait"] = gait_info
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
     return csv_path
+
+def attach_imu_status_csv(video_path, gait_info):
+    csv_path = download_imu_status_csv(video_path)
+    if not csv_path:
+        return None
+
+    metadata_path = recording_metadata_path(video_path)
+    metadata = {}
+    if metadata_path.exists():
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            metadata = {}
+    metadata["imu_status_csv"] = csv_path
+    metadata["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    if "gait" not in metadata:
+        metadata["gait"] = gait_info
+    metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=False), encoding="utf-8")
+    return csv_path
+
+def clear_recording_telemetry_logs():
+    with state_lock:
+        export_servo = state.record_export_servo_csv
+        export_imu = state.record_export_imu_csv
+
+    if export_servo:
+        clear_servo_status_log()
+    if export_imu:
+        clear_imu_status_log()
+
+def attach_recording_telemetry_csv(video_path, gait_info):
+    with state_lock:
+        export_servo = state.record_export_servo_csv
+        export_imu = state.record_export_imu_csv
+
+    results = {}
+    if export_servo:
+        results["servo_status_csv"] = attach_servo_status_csv(video_path, gait_info)
+    if export_imu:
+        results["imu_status_csv"] = attach_imu_status_csv(video_path, gait_info)
+    return results
 
 def open_camera_capture(url):
     if use_realsense():
@@ -755,7 +854,7 @@ def recording_loop():
             height=int(record_h),
             status="saved",
         )
-        attach_servo_status_csv(path, gait_info)
+        attach_recording_telemetry_csv(path, gait_info)
         print("[REC] saved:", path)
 
 def make_preview_frame(frame):
@@ -846,7 +945,7 @@ def preview_loop():
                 if record_path:
                     gait_info = snapshot_recording_gait()
                     write_recording_metadata(Path(record_path), gait_info, status="saved")
-                    attach_servo_status_csv(Path(record_path), gait_info)
+                    attach_recording_telemetry_csv(Path(record_path), gait_info)
                 print("[PREVIEW REC] saved:", record_path)
                 preview_record_writer = None
                 preview_record_codec = None
@@ -874,7 +973,7 @@ def preview_loop():
             if final_record_path:
                 gait_info = snapshot_recording_gait()
                 write_recording_metadata(Path(final_record_path), gait_info, status="saved")
-                attach_servo_status_csv(Path(final_record_path), gait_info)
+                attach_recording_telemetry_csv(Path(final_record_path), gait_info)
             preview_record_writer = None
             preview_record_codec = None
         cap.release()
@@ -1018,6 +1117,8 @@ def root():
             "realsense_color_gain": state.realsense_color_gain,
             "recording": state.recording,
             "recording_path": state.recording_path,
+            "record_export_servo_csv": state.record_export_servo_csv,
+            "record_export_imu_csv": state.record_export_imu_csv,
             "preview_running": state.preview_running,
             "preview_fps": preview_fps,
         }
@@ -1028,6 +1129,44 @@ def set_host(req: HostReq):
         state.esp_host = req.esp_host
         state.esp_ws_port = req.esp_ws_port
     return {"ok": True}
+
+@app.post("/settings/recording_telemetry")
+def set_recording_telemetry(req: RecordingTelemetryReq):
+    with state_lock:
+        state.record_export_servo_csv = bool(req.servo)
+        state.record_export_imu_csv = bool(req.imu)
+        return {
+            "ok": True,
+            "servo": state.record_export_servo_csv,
+            "imu": state.record_export_imu_csv,
+        }
+
+@app.post("/telemetry/clear/{kind}")
+def clear_telemetry_log(kind: str):
+    if kind == "servo":
+        ok = clear_servo_status_log()
+    elif kind == "imu":
+        ok = clear_imu_status_log()
+    else:
+        return {"ok": False, "error": "kind must be servo or imu"}
+    return {"ok": ok, "kind": kind}
+
+@app.post("/telemetry/download_csv/{kind}")
+def download_telemetry_log(kind: str):
+    if kind not in ("servo", "imu"):
+        return {"ok": False, "error": "kind must be servo or imu"}
+
+    path = manual_telemetry_csv_path(kind)
+    saved = download_telemetry_csv(kind, path)
+    if not saved:
+        return {"ok": False, "kind": kind, "error": "download failed"}
+    return {"ok": True, "kind": kind, "csv_path": saved}
+
+@app.post("/telemetry/clear_all")
+def clear_all_telemetry_logs():
+    servo_ok = clear_servo_status_log()
+    imu_ok = clear_imu_status_log()
+    return {"ok": servo_ok and imu_ok, "servo": servo_ok, "imu": imu_ok}
 
 @app.post("/set_interval")
 def set_interval(req: IntervalReq):
@@ -1258,14 +1397,14 @@ def recording_start():
                 start_preview_recording = True
 
         if start_preview_recording:
-            clear_servo_status_log()
+            clear_recording_telemetry_logs()
             path = new_recording_path(snapshot_recording_gait())
             with state_lock:
                 state.recording = True
                 state.recording_path = str(path)
                 return {"ok": True, "recording": True, "path": state.recording_path}
 
-        clear_servo_status_log()
+        clear_recording_telemetry_logs()
         recording_stop_event.clear()
         recording_thread = threading.Thread(target=recording_loop, daemon=True)
         recording_thread.start()
