@@ -13,6 +13,7 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, EvalCallback
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from hopf_cpg import degrees_to_radians
 from plot_fitted_gait_curves import (
@@ -26,6 +27,7 @@ from plot_fitted_gait_curves import (
     trajectory_metrics,
 )
 from rl_turning_env import EelTurningRLEnv, TurningConfig, direction_sign
+from rl_robot_imu_env import EelTurningRobotImuEnv, TurningRobotImuConfig
 from rl_training_plots import default_eval_log_dir, default_plot_path, try_plot_eval_curve
 from train_free_swim_rl import parse_float_list
 
@@ -40,6 +42,8 @@ DETAILED_EVAL_FIELDS = [
     "correct_turn_direction_rate",
     "mean_yaw_rate",
     "mean_body_yaw_rate",
+    "mean_trajectory_yaw_rate",
+    "mean_reward_yaw_rate_value",
     "mean_target_yaw_rate",
     "mean_yaw_rate_error",
     "mean_turn_radius",
@@ -109,7 +113,8 @@ class DetailedEvalMetricsCallback(BaseCallback):#紀錄訓練
         best_episode: dict[str, object] = {"reward": -np.inf, "records": []}
 
         for _ in range(self.n_eval_episodes):
-            env = EelTurningRLEnv(self.cfg)
+            env_cls = EelTurningRobotImuEnv if isinstance(self.cfg, TurningRobotImuConfig) else EelTurningRLEnv
+            env = env_cls(self.cfg)
             obs, _ = env.reset()
             total_reward = 0.0
             total_reward_yaw_rate = 0.0
@@ -167,6 +172,8 @@ class DetailedEvalMetricsCallback(BaseCallback):#紀錄訓練
             "correct_turn_direction_rate": mean_info("correct_turn_direction"),
             "mean_yaw_rate": mean_info("yaw_rate"),
             "mean_body_yaw_rate": mean_info("body_yaw_rate"),
+            "mean_trajectory_yaw_rate": mean_info("trajectory_yaw_rate"),
+            "mean_reward_yaw_rate_value": mean_info("reward_yaw_rate_value"),
             "mean_target_yaw_rate": mean_info("target_yaw_rate"),
             "mean_yaw_rate_error": mean_info("yaw_rate_error"),
             "mean_turn_radius": mean_info("turn_radius"),
@@ -267,8 +274,12 @@ def parse_args():#命令行指令
     parser.add_argument("--tail-amp-multiplier-low", type=float, default=None)
     parser.add_argument("--tail-amp-multiplier-high", type=float, default=None)
     parser.add_argument("--yaw-rate-weight", type=float, default=None)
+    parser.add_argument("--yaw-rate-source", choices=("body", "trajectory"), default=None)
     parser.add_argument("--radius-weight", type=float, default=None)
     parser.add_argument("--reward-average-seconds", type=float, default=None)
+    parser.add_argument("--root-x-damping-scale", type=float, default=None)
+    parser.add_argument("--root-y-damping-scale", type=float, default=None)
+    parser.add_argument("--root-yaw-damping-scale", type=float, default=None)
     parser.add_argument("--boundary-x-min", type=float, default=None)
     parser.add_argument("--boundary-x-max", type=float, default=None)
     parser.add_argument("--boundary-y", type=float, default=None)
@@ -277,11 +288,27 @@ def parse_args():#命令行指令
     parser.add_argument("--eval-log-dir", type=Path, default=None, help="Directory for evaluations.npz.")
     parser.add_argument("--plot-output", type=Path, default=None, help="PNG path for eval reward curve.")
     parser.add_argument("--no-plot", action="store_true", help="Do not create a PNG/CSV plot after training.")
+    parser.add_argument("--robot-imu", action="store_true", help="Train with robot-deployable target/feedback/error/IMU observations.")
+    parser.add_argument("--robot-imu-features", choices=("basic", "servo_qd", "filtered"), default=None)
+    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments.")
+    parser.add_argument("--vec-env", choices=("dummy", "subproc"), default="dummy", help="Parallel environment backend.")
+    parser.add_argument("--servo-feedback-delay-steps", type=int, default=None)
+    parser.add_argument("--servo-feedback-noise-std-deg", type=float, default=None)
+    parser.add_argument("--servo-feedback-quantization-deg", type=float, default=None)
+    parser.add_argument("--imu-delay-steps", type=int, default=None)
+    parser.add_argument("--imu-accel-noise-std-g", type=float, default=None)
+    parser.add_argument("--imu-gyro-noise-std-rps", type=float, default=None)
+    parser.add_argument("--imu-roll-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-pitch-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-yaw-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-random-roll-deg", type=float, default=None)
+    parser.add_argument("--imu-random-pitch-deg", type=float, default=None)
+    parser.add_argument("--imu-random-yaw-deg", type=float, default=None)
     return parser.parse_args()
 
 
 def config_from_args(args) -> TurningConfig:#環境檔參數檔
-    cfg = TurningConfig()
+    cfg = TurningRobotImuConfig() if args.robot_imu else TurningConfig()
     cfg.turn_direction = args.turn_direction
     cfg.target_yaw_rate = abs(float(args.target_yaw_rate))
     if args.target_radius is not None:
@@ -327,20 +354,74 @@ def config_from_args(args) -> TurningConfig:#環境檔參數檔
     # The reward's signed target yaw rate decides which side is useful.
     if args.yaw_rate_weight is not None:
         cfg.yaw_rate_weight = args.yaw_rate_weight
+    if args.yaw_rate_source is not None:
+        cfg.yaw_rate_source = args.yaw_rate_source
     if args.radius_weight is not None:
         cfg.radius_weight = args.radius_weight
     if args.reward_average_seconds is not None:
         cfg.reward_average_seconds = args.reward_average_seconds
+    if args.root_x_damping_scale is not None:
+        cfg.root_x_damping_scale = args.root_x_damping_scale
+    if args.root_y_damping_scale is not None:
+        cfg.root_y_damping_scale = args.root_y_damping_scale
+    if args.root_yaw_damping_scale is not None:
+        cfg.root_yaw_damping_scale = args.root_yaw_damping_scale
     if args.boundary_x_min is not None:
         cfg.boundary_x_min = args.boundary_x_min
     if args.boundary_x_max is not None:
         cfg.boundary_x_max = args.boundary_x_max
     if args.boundary_y is not None:
         cfg.boundary_y = abs(args.boundary_y)
+    if args.robot_imu:
+        if args.robot_imu_features is not None:
+            cfg.robot_imu_features = args.robot_imu_features
+        if args.servo_feedback_delay_steps is not None:
+            cfg.servo_feedback_delay_steps = args.servo_feedback_delay_steps
+        if args.servo_feedback_noise_std_deg is not None:
+            cfg.servo_feedback_noise_std_deg = args.servo_feedback_noise_std_deg
+        if args.servo_feedback_quantization_deg is not None:
+            cfg.servo_feedback_quantization_deg = args.servo_feedback_quantization_deg
+        if args.imu_delay_steps is not None:
+            cfg.imu_delay_steps = args.imu_delay_steps
+        if args.imu_accel_noise_std_g is not None:
+            cfg.imu_accel_noise_std_g = args.imu_accel_noise_std_g
+        if args.imu_gyro_noise_std_rps is not None:
+            cfg.imu_gyro_noise_std_rps = args.imu_gyro_noise_std_rps
+        if args.imu_roll_mount_deg is not None:
+            cfg.imu_roll_mount_deg = args.imu_roll_mount_deg
+        if args.imu_pitch_mount_deg is not None:
+            cfg.imu_pitch_mount_deg = args.imu_pitch_mount_deg
+        if args.imu_yaw_mount_deg is not None:
+            cfg.imu_yaw_mount_deg = args.imu_yaw_mount_deg
+        if args.imu_random_roll_deg is not None:
+            cfg.imu_random_roll_deg = args.imu_random_roll_deg
+        if args.imu_random_pitch_deg is not None:
+            cfg.imu_random_pitch_deg = args.imu_random_pitch_deg
+        if args.imu_random_yaw_deg is not None:
+            cfg.imu_random_yaw_deg = args.imu_random_yaw_deg
 
     # Validate direction spelling early.
     direction_sign(cfg.turn_direction)
     return cfg
+
+
+def make_env(args, cfg: TurningConfig):
+    env_cls = EelTurningRobotImuEnv if args.robot_imu else EelTurningRLEnv
+    return Monitor(env_cls(cfg))
+
+
+def make_train_env(args, cfg: TurningConfig):
+    n_envs = max(1, int(args.n_envs))
+    if n_envs == 1:
+        return make_env(args, cfg)
+
+    def env_factory():
+        return make_env(args, cfg)
+
+    env_fns = [env_factory for _ in range(n_envs)]
+    if args.vec_env == "subproc":
+        return SubprocVecEnv(env_fns)
+    return DummyVecEnv(env_fns)
 
 
 def debug_csv_path(plot_output: Path) -> Path:
@@ -364,7 +445,7 @@ def make_eval_callback(args, cfg: TurningConfig) -> tuple[BaseCallback | None, P
     plot_output = args.plot_output or default_plot_path(args.output)
     debug_output = debug_csv_path(plot_output)
     eval_log_dir.mkdir(parents=True, exist_ok=True)
-    eval_env = Monitor(EelTurningRLEnv(cfg))
+    eval_env = make_env(args, cfg)
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=str(eval_log_dir / "best_model"),
@@ -389,7 +470,7 @@ def main():#訓練入口
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     cfg = config_from_args(args)
-    env = Monitor(EelTurningRLEnv(cfg))
+    env = make_train_env(args, cfg)
     callback, eval_log_dir, plot_output, debug_output = make_eval_callback(args, cfg)
     if args.load_model is None:
         model = PPO(

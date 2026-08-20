@@ -16,6 +16,12 @@ TANK_Y_HALF = 10.0
 DEFAULT_START_X = 0.0
 DEFAULT_START_Y = 0.0
 
+# Sim-to-real calibration from fixed JSON gait comparisons.
+# Keep translational damping unchanged, and increase only root yaw damping.
+DEFAULT_ROOT_X_DAMPING_SCALE = 1.0
+DEFAULT_ROOT_Y_DAMPING_SCALE = 1.0
+DEFAULT_ROOT_YAW_DAMPING_SCALE = 64.0
+
 # Keep the rectangle path away from the top/bottom walls. The eel body swings in y
 # during turns, so using +/-0.35 m as the centerline can make the tail/body touch
 # the y walls even when the base_link follows the route correctly.

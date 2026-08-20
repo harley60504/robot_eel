@@ -13,10 +13,12 @@ import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, EvalCallback
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
 from hopf_cpg import degrees_to_radians
 from plot_fitted_gait_curves import add_sim_metric_box, draw_rotated_tank, rotate_sim_xy, sim_metric_text, trajectory_metrics
 from rl_free_swim_env import EelFreeSwimRLEnv, FreeSwimConfig
+from rl_robot_imu_env import EelFreeSwimRobotImuEnv, FreeSwimRobotImuConfig
 from rl_training_plots import default_eval_log_dir, default_plot_path, try_plot_eval_curve
 
 
@@ -106,7 +108,8 @@ class DetailedFreeSwimEvalMetricsCallback(BaseCallback):
         best_episode: dict[str, object] = {"reward": -np.inf, "records": []}
 
         for _ in range(self.n_eval_episodes):
-            env = EelFreeSwimRLEnv(self.cfg)
+            env_cls = EelFreeSwimRobotImuEnv if isinstance(self.cfg, FreeSwimRobotImuConfig) else EelFreeSwimRLEnv
+            env = env_cls(self.cfg)
             obs, _ = env.reset()
             total_reward = 0.0
             length = 0
@@ -269,11 +272,26 @@ def parse_args():
     parser.add_argument("--eval-log-dir", type=Path, default=None, help="Directory for evaluations.npz.")
     parser.add_argument("--plot-output", type=Path, default=None, help="PNG path for eval reward curve.")
     parser.add_argument("--no-plot", action="store_true", help="Do not create a PNG/CSV plot after training.")
+    parser.add_argument("--robot-imu", action="store_true", help="Train with robot-deployable target/feedback/error/IMU observations.")
+    parser.add_argument("--n-envs", type=int, default=1, help="Number of parallel environments.")
+    parser.add_argument("--vec-env", choices=("dummy", "subproc"), default="dummy", help="Parallel environment backend.")
+    parser.add_argument("--servo-feedback-delay-steps", type=int, default=None)
+    parser.add_argument("--servo-feedback-noise-std-deg", type=float, default=None)
+    parser.add_argument("--servo-feedback-quantization-deg", type=float, default=None)
+    parser.add_argument("--imu-delay-steps", type=int, default=None)
+    parser.add_argument("--imu-accel-noise-std-g", type=float, default=None)
+    parser.add_argument("--imu-gyro-noise-std-rps", type=float, default=None)
+    parser.add_argument("--imu-roll-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-pitch-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-yaw-mount-deg", type=float, default=None)
+    parser.add_argument("--imu-random-roll-deg", type=float, default=None)
+    parser.add_argument("--imu-random-pitch-deg", type=float, default=None)
+    parser.add_argument("--imu-random-yaw-deg", type=float, default=None)
     return parser.parse_args()
 
 
 def config_from_args(args) -> FreeSwimConfig:
-    cfg = FreeSwimConfig()
+    cfg = FreeSwimRobotImuConfig() if args.robot_imu else FreeSwimConfig()
     if args.episode_seconds is not None:
         cfg.episode_seconds = args.episode_seconds
     if args.warmup_seconds is not None:
@@ -314,7 +332,51 @@ def config_from_args(args) -> FreeSwimConfig:
         cfg.boundary_x_max = args.boundary_x_max
     if args.boundary_y is not None:
         cfg.boundary_y = abs(args.boundary_y)
+    if args.robot_imu:
+        if args.servo_feedback_delay_steps is not None:
+            cfg.servo_feedback_delay_steps = args.servo_feedback_delay_steps
+        if args.servo_feedback_noise_std_deg is not None:
+            cfg.servo_feedback_noise_std_deg = args.servo_feedback_noise_std_deg
+        if args.servo_feedback_quantization_deg is not None:
+            cfg.servo_feedback_quantization_deg = args.servo_feedback_quantization_deg
+        if args.imu_delay_steps is not None:
+            cfg.imu_delay_steps = args.imu_delay_steps
+        if args.imu_accel_noise_std_g is not None:
+            cfg.imu_accel_noise_std_g = args.imu_accel_noise_std_g
+        if args.imu_gyro_noise_std_rps is not None:
+            cfg.imu_gyro_noise_std_rps = args.imu_gyro_noise_std_rps
+        if args.imu_roll_mount_deg is not None:
+            cfg.imu_roll_mount_deg = args.imu_roll_mount_deg
+        if args.imu_pitch_mount_deg is not None:
+            cfg.imu_pitch_mount_deg = args.imu_pitch_mount_deg
+        if args.imu_yaw_mount_deg is not None:
+            cfg.imu_yaw_mount_deg = args.imu_yaw_mount_deg
+        if args.imu_random_roll_deg is not None:
+            cfg.imu_random_roll_deg = args.imu_random_roll_deg
+        if args.imu_random_pitch_deg is not None:
+            cfg.imu_random_pitch_deg = args.imu_random_pitch_deg
+        if args.imu_random_yaw_deg is not None:
+            cfg.imu_random_yaw_deg = args.imu_random_yaw_deg
     return cfg
+
+
+def make_env(args, cfg: FreeSwimConfig):
+    env_cls = EelFreeSwimRobotImuEnv if args.robot_imu else EelFreeSwimRLEnv
+    return Monitor(env_cls(cfg))
+
+
+def make_train_env(args, cfg: FreeSwimConfig):
+    n_envs = max(1, int(args.n_envs))
+    if n_envs == 1:
+        return make_env(args, cfg)
+
+    def env_factory():
+        return make_env(args, cfg)
+
+    env_fns = [env_factory for _ in range(n_envs)]
+    if args.vec_env == "subproc":
+        return SubprocVecEnv(env_fns)
+    return DummyVecEnv(env_fns)
 
 
 def debug_csv_path(plot_output: Path) -> Path:
@@ -338,7 +400,7 @@ def make_eval_callback(args, cfg: FreeSwimConfig) -> tuple[BaseCallback | None, 
     plot_output = args.plot_output or default_plot_path(args.output)
     debug_output = debug_csv_path(plot_output)
     eval_log_dir.mkdir(parents=True, exist_ok=True)
-    eval_env = Monitor(EelFreeSwimRLEnv(cfg))
+    eval_env = make_env(args, cfg)
     eval_callback = EvalCallback(
         eval_env,
         best_model_save_path=str(eval_log_dir / "best_model"),
@@ -363,7 +425,7 @@ def main():
     args = parse_args()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     cfg = config_from_args(args)
-    env = Monitor(EelFreeSwimRLEnv(cfg))
+    env = make_train_env(args, cfg)
     callback, eval_log_dir, plot_output, debug_output = make_eval_callback(args, cfg)
     if args.load_model is None:
         model = PPO(

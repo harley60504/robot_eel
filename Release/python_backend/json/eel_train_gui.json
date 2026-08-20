@@ -1,0 +1,92 @@
+{
+  "name": "eel_train_gui",
+  "ajoint": 14.999999999999998,
+  "freq": 1.0,
+  "wavelength": 1.6275,
+  "amp_scales": [
+    1.225,
+    1.075,
+    1.0,
+    1.075,
+    1.15,
+    1.225
+  ],
+  "phase_lags": [
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439,
+    0.614439
+  ],
+  "joint_bias": [
+    0.3499999940395355,
+    0.34988776728510856,
+    0.3363886188715696,
+    0.21745753201190382,
+    0.2794425418972969,
+    0.13462986304424704
+  ],
+  "source": {
+    "type": "best_policy_rerun_mean_fixed_gait",
+    "model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\eel_train_gui\\08_eval_log_dir\\eel_train_gui_eval\\best_model\\best_model.zip",
+    "strategy": "policy-rerun-mean",
+    "turn_direction": "left",
+    "target_yaw_rate": 0.45,
+    "target_radius": 0.4,
+    "policy_rerun_csv": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\eel_train_gui\\04_policy_rerun_mean\\eel_train_gui_policy_rerun_trajectory.csv",
+    "steady_action_count": 400,
+    "steady_reward_mean": -0.4750633454374068,
+    "steady_reward_min": -1.117307817862079,
+    "steady_reward_max": -0.2870019001843318,
+    "env_config": {
+      "xml_path": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\eel.xml",
+      "episode_seconds": 10.0,
+      "warmup_seconds": 2.0,
+      "control_dt": 0.02,
+      "fixed_frequency": 1.0,
+      "fixed_wavelength": 1.6275,
+      "fixed_ajoint": 0.2617993877991494,
+      "start_x": 0.0,
+      "start_y": 0.0,
+      "turn_direction": "left",
+      "target_yaw_rate": 0.45,
+      "target_radius": 0.4,
+      "normalized_actions": true,
+      "fixed_amp_scales": [
+        1.225,
+        1.075,
+        1.0,
+        1.075,
+        1.15,
+        1.225
+      ],
+      "fixed_phase_lags": [
+        0.614439,
+        0.614439,
+        0.614439,
+        0.614439,
+        0.614439
+      ],
+      "action_mode": "bias_only",
+      "joint_bias_low": -0.35,
+      "joint_bias_high": 0.35,
+      "tail_amp_multiplier_low": 0.9,
+      "tail_amp_multiplier_high": 1.4,
+      "reward_average_seconds": 1.0,
+      "yaw_rate_source": "body",
+      "yaw_rate_weight": 1.2,
+      "radius_weight": 1.2,
+      "boundary_x_min": -10.0,
+      "boundary_x_max": 10.0,
+      "boundary_y": 10.0,
+      "wall_collision": false,
+      "root_x_damping_scale": 1.0,
+      "root_y_damping_scale": 1.0,
+      "root_yaw_damping_scale": 64.0
+    },
+    "gui": {
+      "selected_model": "C:\\Users\\ytyla\\Documents\\GitHub\\robot_eel\\mujoco_simulation\\outputs\\zips\\eel_train_gui.zip",
+      "model_source": "eval_best_model"
+    }
+  }
+}

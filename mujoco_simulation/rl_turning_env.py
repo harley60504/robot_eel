@@ -8,7 +8,14 @@ import mujoco
 import numpy as np
 
 from hopf_cpg import DEFAULT_AJOINT_DEG, HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
-from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML
+from sim_config import (
+    DEFAULT_ROOT_X_DAMPING_SCALE,
+    DEFAULT_ROOT_Y_DAMPING_SCALE,
+    DEFAULT_ROOT_YAW_DAMPING_SCALE,
+    DEFAULT_START_X,
+    DEFAULT_START_Y,
+    EEL_MODEL_XML,
+)
 
 try:
     import gymnasium as gym
@@ -33,6 +40,7 @@ def direction_sign(value: str | float | int) -> float:
 TRAIN_BOUNDARY_X_MIN = -10.0
 TRAIN_BOUNDARY_X_MAX = 10.0
 TRAIN_BOUNDARY_Y = 10.0
+DEFAULT_TRUN_SWIM_AJOINT_DEG = 20.0
 
 
 def set_wall_collision(model: mujoco.MjModel, enabled: bool) -> None:
@@ -51,7 +59,7 @@ class TurningConfig:
     control_dt: float = 0.02
     fixed_frequency: float = 1.0
     fixed_wavelength: float = 1.6275
-    fixed_ajoint: float = degrees_to_radians(DEFAULT_AJOINT_DEG)
+    fixed_ajoint: float = degrees_to_radians(DEFAULT_TRUN_SWIM_AJOINT_DEG)
     start_x: float = DEFAULT_START_X
     start_y: float = DEFAULT_START_Y
     turn_direction: str = "left"
@@ -71,12 +79,16 @@ class TurningConfig:
     tail_amp_multiplier_high: float = 1.40
 
     reward_average_seconds: float = 1.0
+    yaw_rate_source: str = "body"
     yaw_rate_weight: float = 1.20
     radius_weight: float = 1.20
     boundary_x_min: float = TRAIN_BOUNDARY_X_MIN
     boundary_x_max: float = TRAIN_BOUNDARY_X_MAX
     boundary_y: float = TRAIN_BOUNDARY_Y
     wall_collision: bool = False
+    root_x_damping_scale: float = DEFAULT_ROOT_X_DAMPING_SCALE
+    root_y_damping_scale: float = DEFAULT_ROOT_Y_DAMPING_SCALE
+    root_yaw_damping_scale: float = DEFAULT_ROOT_YAW_DAMPING_SCALE
 
 
 class EelTurningRLEnv(gym.Env if gym is not None else object):
@@ -109,6 +121,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         self.data = mujoco.MjData(self.model)
         self.model.opt.gravity[:] = (0, 0, -9.81)
         set_wall_collision(self.model, self.cfg.wall_collision)
+        self._apply_root_damping_scales()
 
         self.base_body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, "base_link")
         self.tail_ctrl_slice = slice(0, 6)
@@ -132,7 +145,7 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             maxlen=max(1, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)))
         )
         self.position_window = deque(
-            maxlen=max(2, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)) + 1)
+            maxlen=max(3, 2 * int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)) + 1)
         )
 
         if self.cfg.normalized_actions:#範圍是1~-1
@@ -147,6 +160,18 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
 
         # q(6), qd(6), cpg features(4), root/task features(9)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(25,), dtype=np.float32)
+
+    def _apply_root_damping_scales(self) -> None:
+        for joint_name, scale in (
+            ("root_x", self.cfg.root_x_damping_scale),
+            ("root_y", self.cfg.root_y_damping_scale),
+            ("root_z_rot", self.cfg.root_yaw_damping_scale),
+        ):
+            joint_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            if joint_id < 0:
+                continue
+            dof_id = int(self.model.jnt_dofadr[joint_id])
+            self.model.dof_damping[dof_id] *= max(0.0, float(scale))
 
     @property
     def signed_target_yaw_rate(self) -> float:
@@ -204,9 +229,13 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         avg_speed, avg_vx, avg_vy, avg_body_yaw_rate = (float(value) for value in metrics)
         self.position_window.append((float(self.data.time), float(base_pos[0]), float(base_pos[1])))
         radius_speed = self._window_displacement_speed(avg_speed)
+        trajectory_yaw_rate = self._window_trajectory_yaw_rate(avg_body_yaw_rate)
+        reward_yaw_rate_value = (
+            avg_body_yaw_rate if self.cfg.yaw_rate_source == "body" else trajectory_yaw_rate
+        )
         target_yaw_rate = self.signed_target_yaw_rate
-        yaw_rate_error = abs(avg_body_yaw_rate - target_yaw_rate)
-        signed_turn_rate = np.sign(target_yaw_rate) * avg_body_yaw_rate
+        yaw_rate_error = abs(reward_yaw_rate_value - target_yaw_rate)
+        signed_turn_rate = np.sign(target_yaw_rate) * reward_yaw_rate_value
         correct_turn_direction = signed_turn_rate > 1e-6
         self.prev_action = action.copy()
         #reward方法
@@ -217,8 +246,8 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         if self.cfg.target_radius is not None:
             signed_target_radius = direction_sign(self.cfg.turn_direction) * abs(float(self.cfg.target_radius))
             min_radius_yaw_rate = 0.15
-            yaw_abs = abs(avg_body_yaw_rate)
-            yaw_sign = np.sign(avg_body_yaw_rate)
+            yaw_abs = abs(reward_yaw_rate_value)
+            yaw_sign = np.sign(reward_yaw_rate_value)
             if yaw_sign == 0.0:
                 yaw_sign = direction_sign(self.cfg.turn_direction)
             safe_yaw_rate = yaw_sign * max(yaw_abs, min_radius_yaw_rate)
@@ -256,6 +285,9 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             "radius_speed": radius_speed,
             "yaw_rate": avg_body_yaw_rate,
             "body_yaw_rate": avg_body_yaw_rate,
+            "trajectory_yaw_rate": trajectory_yaw_rate,
+            "reward_yaw_rate_value": reward_yaw_rate_value,
+            "yaw_rate_source": self.cfg.yaw_rate_source,
             "target_yaw_rate": target_yaw_rate,
             "yaw_rate_error": yaw_rate_error,
             "correct_turn_direction": bool(correct_turn_direction),
@@ -278,12 +310,40 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
         rows = np.asarray(self.position_window, dtype=np.float64)
         if rows.ndim != 2 or rows.shape[0] < 2:
             return float(fallback_speed)
-        duration = float(rows[-1, 0] - rows[0, 0])
+        span_steps = max(1, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)))
+        start = rows[-(span_steps + 1)] if rows.shape[0] >= span_steps + 1 else rows[0]
+        end = rows[-1]
+        duration = float(end[0] - start[0])
         if duration <= 1e-9:
             return float(fallback_speed)
-        dx = float(rows[-1, 1] - rows[0, 1])
-        dy = float(rows[-1, 2] - rows[0, 2])
+        dx = float(end[1] - start[1])
+        dy = float(end[2] - start[2])
         return float(np.hypot(dx, dy) / duration)
+
+    def _window_trajectory_yaw_rate(self, fallback_yaw_rate: float) -> float:
+        rows = np.asarray(self.position_window, dtype=np.float64)
+        if rows.ndim != 2 or rows.shape[0] < 3:
+            return float(fallback_yaw_rate)
+        span_steps = max(1, int(round(self.cfg.reward_average_seconds / self.cfg.control_dt)))
+        if rows.shape[0] < 2 * span_steps + 1:
+            return float(fallback_yaw_rate)
+        first_start = rows[-(2 * span_steps + 1)]
+        first_end = rows[-(span_steps + 1)]
+        second_start = rows[-(span_steps + 1)]
+        second_end = rows[-1]
+        duration = float(second_end[0] - first_end[0])
+        if duration <= 1e-9:
+            return float(fallback_yaw_rate)
+        dx1 = float(first_end[1] - first_start[1])
+        dy1 = float(first_end[2] - first_start[2])
+        dx2 = float(second_end[1] - second_start[1])
+        dy2 = float(second_end[2] - second_start[2])
+        if np.hypot(dx1, dy1) < 1e-4 or np.hypot(dx2, dy2) < 1e-4:
+            return float(fallback_yaw_rate)
+        heading1 = float(np.arctan2(dy1, dx1))
+        heading2 = float(np.arctan2(dy2, dx2))
+        heading_delta = float(np.arctan2(np.sin(heading2 - heading1), np.cos(heading2 - heading1)))
+        return -heading_delta / duration
 
     def _validate_fixed_gait(self) -> None:
         if len(self.cfg.fixed_amp_scales) != 6:
@@ -292,6 +352,8 @@ class EelTurningRLEnv(gym.Env if gym is not None else object):
             raise ValueError("fixed_phase_lags must have 5 values")
         if self.cfg.action_mode not in {"bias_only", "bias_tail2_amp", "bias_tail3_amp"}:
             raise ValueError("action_mode must be bias_only, bias_tail2_amp, or bias_tail3_amp")
+        if self.cfg.yaw_rate_source not in {"body", "trajectory"}:
+            raise ValueError("yaw_rate_source must be body or trajectory")
         if self.cfg.target_radius is not None and self.cfg.target_radius <= 0:
             raise ValueError("target_radius must be greater than 0")
         if self.cfg.joint_bias_low > self.cfg.joint_bias_high:

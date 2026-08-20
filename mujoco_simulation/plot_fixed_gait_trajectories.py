@@ -10,7 +10,18 @@ import matplotlib.pyplot as plt
 import mujoco
 import numpy as np
 
-from sim_config import DEFAULT_START_X, DEFAULT_START_Y, EEL_MODEL_XML, RESET_X_MAX, RESET_X_MIN, RESET_Y, TANK_CENTER_X
+from sim_config import (
+    DEFAULT_ROOT_X_DAMPING_SCALE,
+    DEFAULT_ROOT_Y_DAMPING_SCALE,
+    DEFAULT_ROOT_YAW_DAMPING_SCALE,
+    DEFAULT_START_X,
+    DEFAULT_START_Y,
+    EEL_MODEL_XML,
+    RESET_X_MAX,
+    RESET_X_MIN,
+    RESET_Y,
+    TANK_CENTER_X,
+)
 from hopf_cpg import HopfCPG, HopfCPGParams, amp_scales_to_mu_scales, degrees_to_radians
 
 
@@ -30,6 +41,9 @@ def parse_args():
     parser.add_argument("--warmup-seconds", type=float, default=0.0)
     parser.add_argument("--start-x", type=float, default=DEFAULT_START_X)
     parser.add_argument("--start-y", type=float, default=DEFAULT_START_Y)
+    parser.add_argument("--root-x-damping-scale", type=float, default=DEFAULT_ROOT_X_DAMPING_SCALE)
+    parser.add_argument("--root-y-damping-scale", type=float, default=DEFAULT_ROOT_Y_DAMPING_SCALE)
+    parser.add_argument("--root-yaw-damping-scale", type=float, default=DEFAULT_ROOT_YAW_DAMPING_SCALE)
     parser.add_argument("--gait-dir", type=Path, default=Path("gaits"))
     parser.add_argument("--out-dir", type=Path, default=Path("outputs/fixed_gait_trajectories_mean"))
     return parser.parse_args()
@@ -94,6 +108,24 @@ def set_wall_collision(model: mujoco.MjModel, enabled: bool) -> None:
             model.geom_conaffinity[geom_id] = 2 if enabled else 0
 
 
+def apply_root_damping_scales(
+    model: mujoco.MjModel,
+    *,
+    root_x_damping_scale: float = DEFAULT_ROOT_X_DAMPING_SCALE,
+    root_y_damping_scale: float = DEFAULT_ROOT_Y_DAMPING_SCALE,
+    root_yaw_damping_scale: float = DEFAULT_ROOT_YAW_DAMPING_SCALE,
+) -> None:
+    for joint_name, scale in (
+        ("root_x", root_x_damping_scale),
+        ("root_y", root_y_damping_scale),
+        ("root_z_rot", root_yaw_damping_scale),
+    ):
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+        if joint_id >= 0:
+            dof_id = model.jnt_dofadr[joint_id]
+            model.dof_damping[dof_id] *= max(0.0, float(scale))
+
+
 def run_gait(
     xml_path: Path,
     gait_path: Path,
@@ -103,9 +135,18 @@ def run_gait(
     *,
     wall_collision: bool = False,
     stop_on_wall: bool = False,
+    root_x_damping_scale: float = DEFAULT_ROOT_X_DAMPING_SCALE,
+    root_y_damping_scale: float = DEFAULT_ROOT_Y_DAMPING_SCALE,
+    root_yaw_damping_scale: float = DEFAULT_ROOT_YAW_DAMPING_SCALE,
 ):
     gait = json.loads(gait_path.read_text(encoding="utf-8"))
     model = mujoco.MjModel.from_xml_path(str(xml_path))
+    apply_root_damping_scales(
+        model,
+        root_x_damping_scale=root_x_damping_scale,
+        root_y_damping_scale=root_y_damping_scale,
+        root_yaw_damping_scale=root_yaw_damping_scale,
+    )
     data = mujoco.MjData(model)
     model.opt.gravity[:] = (0, 0, 0)
     set_wall_collision(model, wall_collision)
@@ -209,7 +250,16 @@ def main():
     results = []
     for file_name in GAIT_FILES:
         gait_path = root / args.gait_dir / file_name
-        gait, arr, hit_wall = run_gait(xml_path, gait_path, args.seconds, args.start_x, args.start_y)
+        gait, arr, hit_wall = run_gait(
+            xml_path,
+            gait_path,
+            args.seconds,
+            args.start_x,
+            args.start_y,
+            root_x_damping_scale=args.root_x_damping_scale,
+            root_y_damping_scale=args.root_y_damping_scale,
+            root_yaw_damping_scale=args.root_yaw_damping_scale,
+        )
         summary = summarize(arr, args.warmup_seconds)
         results.append((gait["name"], gait, gait_path, arr, summary, hit_wall))
         np.savetxt(

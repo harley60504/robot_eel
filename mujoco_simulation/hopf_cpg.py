@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-DEFAULT_AJOINT_DEG = 15.0
+DEFAULT_AJOINT_DEG = 20.0
 
 
 def wrap_pi(x):
